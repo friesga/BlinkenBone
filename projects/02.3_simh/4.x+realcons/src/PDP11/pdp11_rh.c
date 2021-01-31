@@ -176,6 +176,7 @@ int32 mba_map_pa (int32 pa, int32 *ofs);
 t_stat rh_help (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, const char *cptr);
 const char *rh_description (DEVICE *dptr);
 
+extern void setHITMISS (int);
 extern uint32 Map_Addr (uint32 ba);
 
 /* Massbus register dispatches */
@@ -564,6 +565,7 @@ for (i = 0; i < bc; i = i + pbc) {                      /* loop by pages */
         pbc = bc - i;
     for (j = 0; j < pbc; j = j + 2) {                   /* loop by words */
         *buf++ = M[pa >> 1];                            /* fetch word */
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set cache hit */
         if (!(massbus[mb].cs2 & CS2_UAI)) {             /* if not inhb */
             ba = ba + 2;                                /* incr ba, pa */
             pa = pa + 2;
@@ -603,6 +605,7 @@ for (i = 0; i < bc; i = i + pbc) {                      /* loop by pages */
         pbc = bc - i;
     for (j = 0; j < pbc; j = j + 2) {                   /* loop by words */
         M[pa >> 1] = *buf++;                            /* put word */
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set cache hit */
         if (!(massbus[mb].cs2 & CS2_UAI)) {             /* if not inhb */
             ba = ba + 2;                                /* incr ba, pa */
             pa = pa + 2;
@@ -647,6 +650,7 @@ for (i = 0; i < bc; i = i + pbc) {                      /* loop by pages */
                 ((pa & 1)? CS3_WCO: CS3_WCE);
             break;
             }
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set cache hit */
         if (!(massbus[mb].cs2 & CS2_UAI)) {             /* if not inhb */
             ba = ba + 2;                                /* incr ba, pa */
             pa = pa + 2;

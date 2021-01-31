@@ -61,6 +61,7 @@ extern t_stat cpu_build_dib (void);
 extern void init_mbus_tab (void);
 extern t_stat build_mbus_tab (DEVICE *dptr, DIB *dibp);
 extern void fixup_mbus_tab (void);
+extern void setHITMISS (int);
 
 /* I/O data structures */
 
@@ -257,6 +258,7 @@ if (cpu_bme) {                                          /* map enabled? */
         if (!ADDR_IS_MEM (ma))                          /* NXM? err */
             return (lim - ba);
         *buf++ = (uint8) RdMemB (ma);                   /* get byte */
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set chache hit */
         }
     return 0;
     }
@@ -268,6 +270,7 @@ else {                                                  /* physical */
     else return bc;                                     /* no, err */
     for ( ; ba < alim; ba++) {                          /* by bytes */
         *buf++ = (uint8) RdMemB (ba);                   /* get byte */
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set chache hit */
         }
     return (lim - alim);
     }
@@ -298,6 +301,7 @@ if (cpu_bme) {                                          /* map enabled? */
         if (!ADDR_IS_MEM (ma))                          /* NXM? err */
             return (lim - ba);
         *buf++ = (uint16) RdMemW (ma);
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set chache hit */
         }
     return 0;
     }
@@ -309,6 +313,7 @@ else {                                                  /* physical */
     else return bc;                                     /* no, err */
     for ( ; ba < alim; ba = ba + 2) {                   /* by words */
         *buf++ = (uint16) RdMemW (ba);
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set chache hit */
         }
     return (lim - alim);
     }
@@ -374,6 +379,7 @@ if (cpu_bme) {                                          /* map enabled? */
         if (!ADDR_IS_MEM (ma))                          /* NXM? err */
             return (lim - ba);
         WrMemW (ma, *buf++);
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set chache hit */
         }
     return 0;
     }
@@ -385,6 +391,7 @@ else {                                                  /* physical */
     else return bc;                                     /* no, err */
     for ( ; ba < alim; ba = ba + 2) {                   /* by words */
         WrMemW (ba, *buf++);
+        if (CPUO (OPT_CACHE)) setHITMISS (HIT);         /* set chache hit */
         }
     return (lim - alim);
     }

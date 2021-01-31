@@ -177,6 +177,7 @@
 #define OPT_PAR         (1u << 7)                       /* parity */
 #define OPT_UBM         (1u << 8)                       /* UBM */
 #define OPT_BVT         (1u << 9)                       /* BEVENT */
+#define OPT_CACHE       (1u << 10)                      /* Cache */
 
 #define CPUT(x)         ((cpu_type & (x)) != 0)
 #define CPUO(x)         ((cpu_opt & (x)) != 0)
@@ -316,6 +317,10 @@
 /* STKLIM */
 
 #define STKLIM_RW       0177400
+
+/* Hit/Miss register values */
+#define MISS            0
+#define HIT             1
 
 /* MMR0 */
 
