@@ -105,6 +105,7 @@ extern DEVICE tq_dev;
 extern DEVICE ts_dev;
 extern DEVICE tu_dev;
 extern DEVICE ta_dev;
+extern DEVICE m9312_dev;
 #ifdef USE_DISPLAY
 extern DEVICE vt_dev;
 #endif
@@ -177,6 +178,7 @@ DEVICE *sim_devices[] = {
     &tq_dev,
     &tu_dev,
     &ta_dev,
+    &m9312_dev,
 #ifdef USE_DISPLAY
     &vt_dev,
 #endif

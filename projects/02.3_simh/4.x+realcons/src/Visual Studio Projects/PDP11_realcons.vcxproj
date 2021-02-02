@@ -149,6 +149,7 @@
     <ClCompile Include="..\PDP11\pdp11_kg.c" />
     <ClCompile Include="..\PDP11\pdp11_kmc.c" />
     <ClCompile Include="..\PDP11\pdp11_lp.c" />
+    <ClCompile Include="..\PDP11\pdp11_m9312.c" />
     <ClCompile Include="..\PDP11\pdp11_pclk.c" />
     <ClCompile Include="..\PDP11\pdp11_pt.c" />
     <ClCompile Include="..\PDP11\pdp11_rc.c" />
