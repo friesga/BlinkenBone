@@ -178,7 +178,7 @@ if ((!callback) || !ctx->asynch_io)
                                                                         \
         pthread_mutex_lock (&ctx->io_lock);                             \
                                                                         \
-        sim_debug (ctx->dbit, ctx->dptr,                                \
+        sim_debug_unit (ctx->dbit, uptr,                                \
       "sim_tape AIO_CALL(op=%d, unit=%d)\n", op, (int)(uptr-ctx->dptr->units));\
                                                                         \
         if (ctx->callback)                                              \
@@ -229,7 +229,7 @@ struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
        this thread needs to run */
     sim_os_set_thread_priority (PRIORITY_ABOVE_NORMAL);
 
-    sim_debug (ctx->dbit, ctx->dptr, "_tape_io(unit=%d) starting\n", (int)(uptr-ctx->dptr->units));
+    sim_debug_unit (ctx->dbit, uptr, "_tape_io(unit=%d) starting\n", (int) (uptr - ctx->dptr->units));
 
     pthread_mutex_lock (&ctx->io_lock);
     pthread_cond_signal (&ctx->startup_cond);   /* Signal we're ready to go */
@@ -298,7 +298,7 @@ struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
     }
     pthread_mutex_unlock (&ctx->io_lock);
 
-    sim_debug (ctx->dbit, ctx->dptr, "_tape_io(unit=%d) exiting\n", (int)(uptr-ctx->dptr->units));
+    sim_debug_unit (ctx->dbit, uptr, "_tape_io(unit=%d) exiting\n", (int) (uptr - ctx->dptr->units));
 
     return NULL;
 }
@@ -312,56 +312,56 @@ struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
    Since tape processing only handles a single I/O at a time to a 
    particular tape device, we have the opportunity to possibly detect 
    improper attempts to issue multiple concurrent I/O requests. */
-static void _tape_completion_dispatch (UNIT *uptr)
+static void _tape_completion_dispatch (UNIT* uptr)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-TAPE_PCALLBACK callback = ctx->callback;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	TAPE_PCALLBACK callback = ctx->callback;
 
-sim_debug (ctx->dbit, ctx->dptr, "_tape_completion_dispatch(unit=%d, top=%d, callback=%p)\n", (int)(uptr-ctx->dptr->units), ctx->io_top, ctx->callback);
+	sim_debug_unit (ctx->dbit, uptr, "_tape_completion_dispatch(unit=%d, top=%d, callback=%p)\n", (int) (uptr - ctx->dptr->units), ctx->io_top, ctx->callback);
 
-if (ctx->io_top != TOP_DONE)
-    abort();                                            /* horribly wrong, stop */
+	if (ctx->io_top != TOP_DONE)
+		abort ();                                            /* horribly wrong, stop */
 
-if (ctx->asynch_io)
-    pthread_mutex_lock (&ctx->io_lock);
+	if (ctx->asynch_io)
+		pthread_mutex_lock (&ctx->io_lock);
 
-if (ctx->callback) {
-    ctx->callback = NULL;
-    if (ctx->asynch_io)
-        pthread_mutex_unlock (&ctx->io_lock);
-    callback (uptr, ctx->io_status);
-    }
-else {
-    if (ctx->asynch_io)
-        pthread_mutex_unlock (&ctx->io_lock);
-    }
+	if (ctx->callback) {
+		ctx->callback = NULL;
+		if (ctx->asynch_io)
+			pthread_mutex_unlock (&ctx->io_lock);
+		callback (uptr, ctx->io_status);
+	}
+	else {
+		if (ctx->asynch_io)
+			pthread_mutex_unlock (&ctx->io_lock);
+	}
 }
 
-static t_bool _tape_is_active (UNIT *uptr)
+static t_bool _tape_is_active (UNIT* uptr)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
 
-if (ctx) {
-    sim_debug (ctx->dbit, ctx->dptr, "_tape_is_active(unit=%d, top=%d)\n", (int)(uptr-ctx->dptr->units), ctx->io_top);
-    return (ctx->io_top != TOP_DONE);
-    }
-return FALSE;
+	if (ctx) {
+		sim_debug_unit (ctx->dbit, uptr, "_tape_is_active(unit=%d, top=%d)\n", (int) (uptr - ctx->dptr->units), ctx->io_top);
+		return (ctx->io_top != TOP_DONE);
+	}
+	return FALSE;
 }
 
-static t_bool _tape_cancel (UNIT *uptr)
+static t_bool _tape_cancel (UNIT* uptr)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
 
-if (ctx) {
-    sim_debug (ctx->dbit, ctx->dptr, "_tape_cancel(unit=%d, top=%d)\n", (int)(uptr-ctx->dptr->units), ctx->io_top);
-    if (ctx->asynch_io) {
-        pthread_mutex_lock (&ctx->io_lock);
-        while (ctx->io_top != TOP_DONE)
-            pthread_cond_wait (&ctx->io_done, &ctx->io_lock);
-        pthread_mutex_unlock (&ctx->io_lock);
-        }
-    }
-return FALSE;
+	if (ctx) {
+		sim_debug_unit (ctx->dbit, uptr, "_tape_cancel(unit=%d, top=%d)\n", (int) (uptr - ctx->dptr->units), ctx->io_top);
+		if (ctx->asynch_io) {
+			pthread_mutex_lock (&ctx->io_lock);
+			while (ctx->io_top != TOP_DONE)
+				pthread_cond_wait (&ctx->io_done, &ctx->io_lock);
+			pthread_mutex_unlock (&ctx->io_lock);
+		}
+	}
+	return FALSE;
 }
 #else
 #define AIO_CALLSETUP                                                       \
@@ -1164,49 +1164,49 @@ return status;
    data record error    updated
 */
 
-t_stat sim_tape_rdrecf (UNIT *uptr, uint8 *buf, t_mtrlnt *bc, t_mtrlnt max)
+t_stat sim_tape_rdrecf (UNIT* uptr, uint8* buf, t_mtrlnt* bc, t_mtrlnt max)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-uint32 f = MT_GET_FMT (uptr);
-t_mtrlnt i, tbc, rbc;
-t_addr opos;
-t_stat st;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	uint32 f = MT_GET_FMT (uptr);
+	t_mtrlnt i, tbc, rbc;
+	t_addr opos;
+	t_stat st;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_rdrecf(unit=%d, buf=%p, max=%d)\n", (int)(uptr-ctx->dptr->units), buf, max);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_rdrecf(unit=%d, buf=%p, max=%d)\n", (int) (uptr - ctx->dptr->units), buf, max);
 
-opos = uptr->pos;                                       /* old position */
-st = sim_tape_rdrlfwd (uptr, &tbc);                     /* read rec lnt */
-if (st != MTSE_OK)
-    return st;
-*bc = rbc = MTR_L (tbc);                                /* strip error flag */
-if (rbc > max) {                                        /* rec out of range? */
-    MT_SET_PNU (uptr);
-    uptr->pos = opos;
-    return MTSE_INVRL;
-    }
-i = (t_mtrlnt) sim_fread (buf, sizeof (uint8), rbc, uptr->fileref); /* read record */
-if (ferror (uptr->fileref)) {                           /* error? */
-    MT_SET_PNU (uptr);
-    uptr->pos = opos;
-    return sim_tape_ioerr (uptr);
-    }
-for ( ; i < rbc; i++)                                   /* fill with 0's */
-    buf[i] = 0;
-if (f == MTUF_F_P7B)                                    /* p7b? strip SOR */
-    buf[0] = buf[0] & P7B_DPAR;
-sim_tape_data_trace(uptr, buf, rbc, "Record Read", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
-return (MTR_F (tbc)? MTSE_RECE: MTSE_OK);
+	opos = uptr->pos;                                       /* old position */
+	st = sim_tape_rdrlfwd (uptr, &tbc);                     /* read rec lnt */
+	if (st != MTSE_OK)
+		return st;
+	*bc = rbc = MTR_L (tbc);                                /* strip error flag */
+	if (rbc > max) {                                        /* rec out of range? */
+		MT_SET_PNU (uptr);
+		uptr->pos = opos;
+		return MTSE_INVRL;
+	}
+	i = (t_mtrlnt) sim_fread (buf, sizeof (uint8), rbc, uptr->fileref); /* read record */
+	if (ferror (uptr->fileref)) {                           /* error? */
+		MT_SET_PNU (uptr);
+		uptr->pos = opos;
+		return sim_tape_ioerr (uptr);
+	}
+	for (; i < rbc; i++)                                   /* fill with 0's */
+		buf[i] = 0;
+	if (f == MTUF_F_P7B)                                    /* p7b? strip SOR */
+		buf[0] = buf[0] & P7B_DPAR;
+	sim_tape_data_trace (uptr, buf, rbc, "Record Read", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
+	return (MTR_F (tbc) ? MTSE_RECE : MTSE_OK);
 }
 
-t_stat sim_tape_rdrecf_a (UNIT *uptr, uint8 *buf, t_mtrlnt *bc, t_mtrlnt max, TAPE_PCALLBACK callback)
+t_stat sim_tape_rdrecf_a (UNIT* uptr, uint8* buf, t_mtrlnt* bc, t_mtrlnt max, TAPE_PCALLBACK callback)
 {
-t_stat r = SCPE_OK;
-AIO_CALLSETUP
-    r = sim_tape_rdrecf (uptr, buf, bc, max);
-AIO_CALL(TOP_RDRF, buf, bc, NULL, max, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = SCPE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_rdrecf (uptr, buf, bc, max);
+	AIO_CALL (TOP_RDRF, buf, bc, NULL, max, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 
@@ -1232,41 +1232,41 @@ return r;
    data record error    updated
 */
 
-t_stat sim_tape_rdrecr (UNIT *uptr, uint8 *buf, t_mtrlnt *bc, t_mtrlnt max)
+t_stat sim_tape_rdrecr (UNIT* uptr, uint8* buf, t_mtrlnt* bc, t_mtrlnt max)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-uint32 f = MT_GET_FMT (uptr);
-t_mtrlnt i, rbc, tbc;
-t_stat st;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	uint32 f = MT_GET_FMT (uptr);
+	t_mtrlnt i, rbc, tbc;
+	t_stat st;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_rdrecr(unit=%d, buf=%p, max=%d)\n", (int)(uptr-ctx->dptr->units), buf, max);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_rdrecr(unit=%d, buf=%p, max=%d)\n", (int) (uptr - ctx->dptr->units), buf, max);
 
-st = sim_tape_rdrlrev (uptr, &tbc);                     /* read rec lnt */
-if (st != MTSE_OK)
-    return st;
-*bc = rbc = MTR_L (tbc);                                /* strip error flag */
-if (rbc > max)                                          /* rec out of range? */
-    return MTSE_INVRL;
-i = (t_mtrlnt) sim_fread (buf, sizeof (uint8), rbc, uptr->fileref); /* read record */
-if (ferror (uptr->fileref))                             /* error? */
-    return sim_tape_ioerr (uptr);
-for ( ; i < rbc; i++)                                   /* fill with 0's */
-    buf[i] = 0;
-if (f == MTUF_F_P7B)                                    /* p7b? strip SOR */
-    buf[0] = buf[0] & P7B_DPAR;
-sim_tape_data_trace(uptr, buf, rbc, "Record Read Reverse", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
-return (MTR_F (tbc)? MTSE_RECE: MTSE_OK);
+	st = sim_tape_rdrlrev (uptr, &tbc);                     /* read rec lnt */
+	if (st != MTSE_OK)
+		return st;
+	*bc = rbc = MTR_L (tbc);                                /* strip error flag */
+	if (rbc > max)                                          /* rec out of range? */
+		return MTSE_INVRL;
+	i = (t_mtrlnt) sim_fread (buf, sizeof (uint8), rbc, uptr->fileref); /* read record */
+	if (ferror (uptr->fileref))                             /* error? */
+		return sim_tape_ioerr (uptr);
+	for (; i < rbc; i++)                                   /* fill with 0's */
+		buf[i] = 0;
+	if (f == MTUF_F_P7B)                                    /* p7b? strip SOR */
+		buf[0] = buf[0] & P7B_DPAR;
+	sim_tape_data_trace (uptr, buf, rbc, "Record Read Reverse", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
+	return (MTR_F (tbc) ? MTSE_RECE : MTSE_OK);
 }
 
-t_stat sim_tape_rdrecr_a (UNIT *uptr, uint8 *buf, t_mtrlnt *bc, t_mtrlnt max, TAPE_PCALLBACK callback)
+t_stat sim_tape_rdrecr_a (UNIT* uptr, uint8* buf, t_mtrlnt* bc, t_mtrlnt max, TAPE_PCALLBACK callback)
 {
-t_stat r = SCPE_OK;
-AIO_CALLSETUP
-    r = sim_tape_rdrecr (uptr, buf, bc, max);
-AIO_CALL(TOP_RDRR, buf, bc, NULL, max, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = SCPE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_rdrecr (uptr, buf, bc, max);
+	AIO_CALL (TOP_RDRR, buf, bc, NULL, max, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Write record forward
@@ -1286,169 +1286,169 @@ return r;
    data record          updated
 */
 
-t_stat sim_tape_wrrecf (UNIT *uptr, uint8 *buf, t_mtrlnt bc)
+t_stat sim_tape_wrrecf (UNIT* uptr, uint8* buf, t_mtrlnt bc)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-uint32 f = MT_GET_FMT (uptr);
-t_mtrlnt sbc;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	uint32 f = MT_GET_FMT (uptr);
+	t_mtrlnt sbc;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_wrrecf(unit=%d, buf=%p, bc=%d)\n", (int)(uptr-ctx->dptr->units), buf, bc);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_wrrecf(unit=%d, buf=%p, bc=%d)\n", (int) (uptr - ctx->dptr->units), buf, bc);
 
-sim_tape_data_trace(uptr, buf, bc, "Record Write", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
-MT_CLR_PNU (uptr);
-sbc = MTR_L (bc);
-if ((uptr->flags & UNIT_ATT) == 0)                      /* not attached? */
-    return MTSE_UNATT;
-if (sim_tape_wrp (uptr))                                /* write prot? */
-    return MTSE_WRP;
-if (sbc == 0)                                           /* nothing to do? */
-    return MTSE_OK;
-sim_fseek (uptr->fileref, uptr->pos, SEEK_SET);         /* set pos */
-switch (f) {                                            /* case on format */
+	sim_tape_data_trace (uptr, buf, bc, "Record Write", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
+	MT_CLR_PNU (uptr);
+	sbc = MTR_L (bc);
+	if ((uptr->flags & UNIT_ATT) == 0)                      /* not attached? */
+		return MTSE_UNATT;
+	if (sim_tape_wrp (uptr))                                /* write prot? */
+		return MTSE_WRP;
+	if (sbc == 0)                                           /* nothing to do? */
+		return MTSE_OK;
+	sim_fseek (uptr->fileref, uptr->pos, SEEK_SET);         /* set pos */
+	switch (f) {                                            /* case on format */
 
-    case MTUF_F_STD:                                    /* standard */
-        sbc = MTR_L ((bc + 1) & ~1);                    /* pad odd length */
-    case MTUF_F_E11:                                    /* E11 */
-        sim_fwrite (&bc, sizeof (t_mtrlnt), 1, uptr->fileref);
-        sim_fwrite (buf, sizeof (uint8), sbc, uptr->fileref);
-        sim_fwrite (&bc, sizeof (t_mtrlnt), 1, uptr->fileref);
-        if (ferror (uptr->fileref)) {                   /* error? */
-            MT_SET_PNU (uptr);
-            return sim_tape_ioerr (uptr);
-            }
-        uptr->pos = uptr->pos + sbc + (2 * sizeof (t_mtrlnt));  /* move tape */
-        break;
+		case MTUF_F_STD:                                    /* standard */
+			sbc = MTR_L ((bc + 1) & ~1);                    /* pad odd length */
+		case MTUF_F_E11:                                    /* E11 */
+			sim_fwrite (&bc, sizeof (t_mtrlnt), 1, uptr->fileref);
+			sim_fwrite (buf, sizeof (uint8), sbc, uptr->fileref);
+			sim_fwrite (&bc, sizeof (t_mtrlnt), 1, uptr->fileref);
+			if (ferror (uptr->fileref)) {                   /* error? */
+				MT_SET_PNU (uptr);
+				return sim_tape_ioerr (uptr);
+			}
+			uptr->pos = uptr->pos + sbc + (2 * sizeof (t_mtrlnt));  /* move tape */
+			break;
 
-    case MTUF_F_P7B:                                    /* Pierce 7B */
-        buf[0] = buf[0] | P7B_SOR;                      /* mark start of rec */
-        sim_fwrite (buf, sizeof (uint8), sbc, uptr->fileref);
-        sim_fwrite (buf, sizeof (uint8), 1, uptr->fileref); /* delimit rec */
-        if (ferror (uptr->fileref)) {                   /* error? */
-            MT_SET_PNU (uptr);
-            return sim_tape_ioerr (uptr);
-            }
-        uptr->pos = uptr->pos + sbc;                    /* move tape */
-        break;
-        }
-sim_tape_data_trace(uptr, buf, sbc, "Record Written", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
-return MTSE_OK;
+		case MTUF_F_P7B:                                    /* Pierce 7B */
+			buf[0] = buf[0] | P7B_SOR;                      /* mark start of rec */
+			sim_fwrite (buf, sizeof (uint8), sbc, uptr->fileref);
+			sim_fwrite (buf, sizeof (uint8), 1, uptr->fileref); /* delimit rec */
+			if (ferror (uptr->fileref)) {                   /* error? */
+				MT_SET_PNU (uptr);
+				return sim_tape_ioerr (uptr);
+			}
+			uptr->pos = uptr->pos + sbc;                    /* move tape */
+			break;
+	}
+	sim_tape_data_trace (uptr, buf, sbc, "Record Written", ctx->dptr->dctrl & MTSE_DBG_DAT, MTSE_DBG_STR);
+	return MTSE_OK;
 }
 
-t_stat sim_tape_wrrecf_a (UNIT *uptr, uint8 *buf, t_mtrlnt bc, TAPE_PCALLBACK callback)
+t_stat sim_tape_wrrecf_a (UNIT* uptr, uint8* buf, t_mtrlnt bc, TAPE_PCALLBACK callback)
 {
-t_stat r = SCPE_OK;
-AIO_CALLSETUP
-    r = sim_tape_wrrecf (uptr, buf, bc);
-AIO_CALL(TOP_WREC, buf, 0, NULL, 0, bc, 0, 0, NULL, callback);
-return r;
+	t_stat r = SCPE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_wrrecf (uptr, buf, bc);
+	AIO_CALL (TOP_WREC, buf, 0, NULL, 0, bc, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Write metadata forward (internal routine) */
 
-static t_stat sim_tape_wrdata (UNIT *uptr, uint32 dat)
+static t_stat sim_tape_wrdata (UNIT* uptr, uint32 dat)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
 
-MT_CLR_PNU (uptr);
-if ((uptr->flags & UNIT_ATT) == 0)                      /* not attached? */
-    return MTSE_UNATT;
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-if (sim_tape_wrp (uptr))                                /* write prot? */
-    return MTSE_WRP;
-sim_fseek (uptr->fileref, uptr->pos, SEEK_SET);         /* set pos */
-sim_fwrite (&dat, sizeof (t_mtrlnt), 1, uptr->fileref);
-if (ferror (uptr->fileref)) {                           /* error? */
-    MT_SET_PNU (uptr);
-    return sim_tape_ioerr (uptr);
-    }
-sim_debug (MTSE_DBG_STR, ctx->dptr, "wr_lnt: lnt: %d, pos: %" T_ADDR_FMT "u\n", dat, uptr->pos);
-uptr->pos = uptr->pos + sizeof (t_mtrlnt);              /* move tape */
-return MTSE_OK;
+	MT_CLR_PNU (uptr);
+	if ((uptr->flags & UNIT_ATT) == 0)                      /* not attached? */
+		return MTSE_UNATT;
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	if (sim_tape_wrp (uptr))                                /* write prot? */
+		return MTSE_WRP;
+	sim_fseek (uptr->fileref, uptr->pos, SEEK_SET);         /* set pos */
+	sim_fwrite (&dat, sizeof (t_mtrlnt), 1, uptr->fileref);
+	if (ferror (uptr->fileref)) {                           /* error? */
+		MT_SET_PNU (uptr);
+		return sim_tape_ioerr (uptr);
+	}
+	sim_debug (MTSE_DBG_STR, ctx->dptr, "wr_lnt: lnt: %d, pos: %" T_ADDR_FMT "u\n", dat, uptr->pos);
+	uptr->pos = uptr->pos + sizeof (t_mtrlnt);              /* move tape */
+	return MTSE_OK;
 }
 
 /* Write tape mark */
 
-t_stat sim_tape_wrtmk (UNIT *uptr)
+t_stat sim_tape_wrtmk (UNIT* uptr)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_wrtmk(unit=%d)\n", (int)(uptr-ctx->dptr->units));
-if (MT_GET_FMT (uptr) == MTUF_F_P7B) {                  /* P7B? */
-    uint8 buf = P7B_EOF;                                /* eof mark */
-    return sim_tape_wrrecf (uptr, &buf, 1);             /* write char */
-    }
-return sim_tape_wrdata (uptr, MTR_TMK);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_wrtmk(unit=%d)\n", (int) (uptr - ctx->dptr->units));
+	if (MT_GET_FMT (uptr) == MTUF_F_P7B) {                  /* P7B? */
+		uint8 buf = P7B_EOF;                                /* eof mark */
+		return sim_tape_wrrecf (uptr, &buf, 1);             /* write char */
+	}
+	return sim_tape_wrdata (uptr, MTR_TMK);
 }
 
-t_stat sim_tape_wrtmk_a (UNIT *uptr, TAPE_PCALLBACK callback)
+t_stat sim_tape_wrtmk_a (UNIT* uptr, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_wrtmk (uptr);
-AIO_CALL(TOP_WTMK, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_wrtmk (uptr);
+	AIO_CALL (TOP_WTMK, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Write end of medium */
 
-t_stat sim_tape_wreom (UNIT *uptr)
+t_stat sim_tape_wreom (UNIT* uptr)
 {
-t_stat result;
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
+	t_stat result;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_wreom(unit=%d)\n", (int)(uptr-ctx->dptr->units));
-if (MT_GET_FMT (uptr) == MTUF_F_P7B)                    /* cant do P7B */
-    return MTSE_FMT;
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_wreom(unit=%d)\n", (int) (uptr - ctx->dptr->units));
+	if (MT_GET_FMT (uptr) == MTUF_F_P7B)                    /* cant do P7B */
+		return MTSE_FMT;
 
-result = sim_tape_wrdata (uptr, MTR_EOM);               /* write the EOM marker */
+	result = sim_tape_wrdata (uptr, MTR_EOM);               /* write the EOM marker */
 
-uptr->pos = uptr->pos - sizeof (t_mtrlnt);              /* restore original tape position */
-MT_SET_PNU (uptr);                                      /* indicate that position was not updated */
+	uptr->pos = uptr->pos - sizeof (t_mtrlnt);              /* restore original tape position */
+	MT_SET_PNU (uptr);                                      /* indicate that position was not updated */
 
-return result;
+	return result;
 }
 
-t_stat sim_tape_wreom_a (UNIT *uptr, TAPE_PCALLBACK callback)
+t_stat sim_tape_wreom_a (UNIT* uptr, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_wreom (uptr);
-AIO_CALL(TOP_WEOM, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_wreom (uptr);
+	AIO_CALL (TOP_WEOM, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Write end of medium-rewind */
 
-t_stat sim_tape_wreomrw (UNIT *uptr)
+t_stat sim_tape_wreomrw (UNIT* uptr)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat r;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat r;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_wreomrw(unit=%d)\n", (int)(uptr-ctx->dptr->units));
-if (MT_GET_FMT (uptr) == MTUF_F_P7B)                    /* cant do P7B */
-    return MTSE_FMT;
-r = sim_tape_wrdata (uptr, MTR_EOM);
-if (r == MTSE_OK)
-    r = sim_tape_rewind (uptr);
-return r;
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_wreomrw(unit=%d)\n", (int) (uptr - ctx->dptr->units));
+	if (MT_GET_FMT (uptr) == MTUF_F_P7B)                    /* cant do P7B */
+		return MTSE_FMT;
+	r = sim_tape_wrdata (uptr, MTR_EOM);
+	if (r == MTSE_OK)
+		r = sim_tape_rewind (uptr);
+	return r;
 }
 
-t_stat sim_tape_wreomrw_a (UNIT *uptr, TAPE_PCALLBACK callback)
+t_stat sim_tape_wreomrw_a (UNIT* uptr, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_wreomrw (uptr);
-AIO_CALL(TOP_WEMR, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_wreomrw (uptr);
+	AIO_CALL (TOP_WEMR, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 
@@ -1859,30 +1859,30 @@ return status;                                          /* return the status of 
    during writing.
 */
 
-t_stat sim_tape_wrgap (UNIT *uptr, uint32 gaplen)
+t_stat sim_tape_wrgap (UNIT* uptr, uint32 gaplen)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-const uint32 density = bpi [MT_DENS (uptr->dynflags)];  /* the tape density in bits per inch */
-const uint32 byte_length = (gaplen * density) / 10;     /* the size of the requested gap in bytes */
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	const uint32 density = bpi[MT_DENS (uptr->dynflags)];  /* the tape density in bits per inch */
+	const uint32 byte_length = (gaplen * density) / 10;     /* the size of the requested gap in bytes */
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
 
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_wrgap(unit=%d, gaplen=%u)\n", (int)(uptr-ctx->dptr->units), gaplen);
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_wrgap(unit=%d, gaplen=%u)\n", (int) (uptr - ctx->dptr->units), gaplen);
 
-if (density == 0)                                       /* if the density has not been set */
-    return MTSE_IOERR;                                  /*   then report an I/O error */
-else                                                    /* otherwise */
-    return tape_erase_fwd (uptr, byte_length);          /*   erase the requested gap size in bytes */
+	if (density == 0)                                       /* if the density has not been set */
+		return MTSE_IOERR;                                  /*   then report an I/O error */
+	else                                                    /* otherwise */
+		return tape_erase_fwd (uptr, byte_length);          /*   erase the requested gap size in bytes */
 }
 
-t_stat sim_tape_wrgap_a (UNIT *uptr, uint32 gaplen, TAPE_PCALLBACK callback)
+t_stat sim_tape_wrgap_a (UNIT* uptr, uint32 gaplen, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_wrgap (uptr, gaplen);
-AIO_CALL(TOP_RDRR, NULL, NULL, NULL, 0, 0, gaplen, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_wrgap (uptr, gaplen);
+	AIO_CALL (TOP_RDRR, NULL, NULL, NULL, 0, 0, gaplen, 0, NULL, callback);
+	return r;
 }
 
 /* Erase a record forward.
@@ -1901,15 +1901,15 @@ return r;
    unchanged.
 */
 
-t_stat sim_tape_errecf (UNIT *uptr, t_mtrlnt bc)
+t_stat sim_tape_errecf (UNIT* uptr, t_mtrlnt bc)
 {
-const t_mtrlnt meta_size = sizeof (t_mtrlnt);           /* the number of bytes per metadatum */
-const t_mtrlnt gap_size = bc + 2 * meta_size;           /* the requested gap size in bytes */
+	const t_mtrlnt meta_size = sizeof (t_mtrlnt);           /* the number of bytes per metadatum */
+	const t_mtrlnt gap_size = bc + 2 * meta_size;           /* the requested gap size in bytes */
 
-if (bc == 0)                                            /* if a zero-length erase is requested */
-    return tape_erase_fwd (uptr, meta_size);            /*   then erase a metadatum marker */
-else                                                    /* otherwise */
-    return tape_erase_fwd (uptr, gap_size);             /*   erase the requested gap */
+	if (bc == 0)                                            /* if a zero-length erase is requested */
+		return tape_erase_fwd (uptr, meta_size);            /*   then erase a metadatum marker */
+	else                                                    /* otherwise */
+		return tape_erase_fwd (uptr, gap_size);             /*   erase the requested gap */
 }
 
 /* Erase a record reverse.
@@ -1928,15 +1928,15 @@ else                                                    /* otherwise */
    unchanged.
 */
 
-t_stat sim_tape_errecr (UNIT *uptr, t_mtrlnt bc)
+t_stat sim_tape_errecr (UNIT* uptr, t_mtrlnt bc)
 {
-const t_mtrlnt meta_size = sizeof (t_mtrlnt);           /* the number of bytes per metadatum */
-const t_mtrlnt gap_size = bc + 2 * meta_size;           /* the requested gap size in bytes */
+	const t_mtrlnt meta_size = sizeof (t_mtrlnt);           /* the number of bytes per metadatum */
+	const t_mtrlnt gap_size = bc + 2 * meta_size;           /* the requested gap size in bytes */
 
-if (bc == 0)                                            /* if a zero-length erase is requested */
-    return tape_erase_rev (uptr, meta_size);            /*   then erase a metadatum marker */
-else                                                    /* otherwise */
-    return tape_erase_rev (uptr, gap_size);             /*   erase the requested gap */
+	if (bc == 0)                                            /* if a zero-length erase is requested */
+		return tape_erase_rev (uptr, meta_size);            /*   then erase a metadatum marker */
+	else                                                    /* otherwise */
+		return tape_erase_rev (uptr, gap_size);             /*   erase the requested gap */
 }
 
 /* Space record forward
@@ -1957,27 +1957,27 @@ else                                                    /* otherwise */
    data record error    updated
 */
 
-t_stat sim_tape_sprecf (UNIT *uptr, t_mtrlnt *bc)
+t_stat sim_tape_sprecf (UNIT* uptr, t_mtrlnt* bc)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat st;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat st;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_sprecf(unit=%d)\n", (int)(uptr-ctx->dptr->units));
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+    sim_debug_unit (ctx->dbit, uptr, "sim_tape_sprecf(unit=%d)\n", (int) (uptr - ctx->dptr->units));
 
-st = sim_tape_rdrlfwd (uptr, bc);                       /* get record length */
-*bc = MTR_L (*bc);
-return st;
+	st = sim_tape_rdrlfwd (uptr, bc);                       /* get record length */
+	*bc = MTR_L (*bc);
+	return st;
 }
 
-t_stat sim_tape_sprecf_a (UNIT *uptr, t_mtrlnt *bc, TAPE_PCALLBACK callback)
+t_stat sim_tape_sprecf_a (UNIT* uptr, t_mtrlnt* bc, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_sprecf (uptr, bc);
-AIO_CALL(TOP_SPRF, NULL, bc, NULL, 0, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_sprecf (uptr, bc);
+	AIO_CALL (TOP_SPRF, NULL, bc, NULL, 0, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Space records forward
@@ -1999,33 +1999,33 @@ return r;
    data record error    updated
 */
 
-t_stat sim_tape_sprecsf (UNIT *uptr, uint32 count, uint32 *skipped)
+t_stat sim_tape_sprecsf (UNIT* uptr, uint32 count, uint32* skipped)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat st;
-t_mtrlnt tbc;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat st;
+	t_mtrlnt tbc;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_sprecsf(unit=%d, count=%d)\n", (int)(uptr-ctx->dptr->units), count);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_sprecsf(unit=%d, count=%d)\n", (int) (uptr - ctx->dptr->units), count);
 
-*skipped = 0;
-while (*skipped < count) {                              /* loopo */
-    st = sim_tape_sprecf (uptr, &tbc);                  /* spc rec */
-    if (st != MTSE_OK)
-        return st;
-    *skipped = *skipped + 1;                            /* # recs skipped */
-    }
-return MTSE_OK;
+	*skipped = 0;
+	while (*skipped < count) {                              /* loopo */
+		st = sim_tape_sprecf (uptr, &tbc);                  /* spc rec */
+		if (st != MTSE_OK)
+			return st;
+		*skipped = *skipped + 1;                            /* # recs skipped */
+	}
+	return MTSE_OK;
 }
 
-t_stat sim_tape_sprecsf_a (UNIT *uptr, uint32 count, uint32 *skipped, TAPE_PCALLBACK callback)
+t_stat sim_tape_sprecsf_a (UNIT* uptr, uint32 count, uint32* skipped, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_sprecsf (uptr, count, skipped);
-AIO_CALL(TOP_SRSF, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_sprecsf (uptr, count, skipped);
+	AIO_CALL (TOP_SRSF, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Space record reverse
@@ -2047,32 +2047,32 @@ return r;
    data record          updated
 */
 
-t_stat sim_tape_sprecr (UNIT *uptr, t_mtrlnt *bc)
+t_stat sim_tape_sprecr (UNIT* uptr, t_mtrlnt* bc)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat st;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat st;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_sprecr(unit=%d)\n", (int)(uptr-ctx->dptr->units));
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_sprecr(unit=%d)\n", (int) (uptr - ctx->dptr->units));
 
-if (MT_TST_PNU (uptr)) {
-    MT_CLR_PNU (uptr);
-    *bc = 0;
-    return MTSE_OK;
-    }
-st = sim_tape_rdrlrev (uptr, bc);                       /* get record length */
-*bc = MTR_L (*bc);
-return st;
+	if (MT_TST_PNU (uptr)) {
+		MT_CLR_PNU (uptr);
+		*bc = 0;
+		return MTSE_OK;
+	}
+	st = sim_tape_rdrlrev (uptr, bc);                       /* get record length */
+	*bc = MTR_L (*bc);
+	return st;
 }
 
-t_stat sim_tape_sprecr_a (UNIT *uptr, t_mtrlnt *bc, TAPE_PCALLBACK callback)
+t_stat sim_tape_sprecr_a (UNIT* uptr, t_mtrlnt* bc, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_sprecr (uptr, bc);
-AIO_CALL(TOP_SPRR, NULL, bc, NULL, 0, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_sprecr (uptr, bc);
+	AIO_CALL (TOP_SPRR, NULL, bc, NULL, 0, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Space records reverse
@@ -2095,33 +2095,33 @@ return r;
    data record          updated
 */
 
-t_stat sim_tape_sprecsr (UNIT *uptr, uint32 count, uint32 *skipped)
+t_stat sim_tape_sprecsr (UNIT* uptr, uint32 count, uint32* skipped)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat st;
-t_mtrlnt tbc;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat st;
+	t_mtrlnt tbc;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_sprecsr(unit=%d, count=%d)\n", (int)(uptr-ctx->dptr->units), count);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_sprecsr(unit=%d, count=%d)\n", (int) (uptr - ctx->dptr->units), count);
 
-*skipped = 0;
-while (*skipped < count) {                              /* loopo */
-    st = sim_tape_sprecr (uptr, &tbc);                  /* spc rec rev */
-    if (st != MTSE_OK)
-        return st;
-    *skipped = *skipped + 1;                            /* # recs skipped */
-    }
-return MTSE_OK;
+	*skipped = 0;
+	while (*skipped < count) {                              /* loopo */
+		st = sim_tape_sprecr (uptr, &tbc);                  /* spc rec rev */
+		if (st != MTSE_OK)
+			return st;
+		*skipped = *skipped + 1;                            /* # recs skipped */
+	}
+	return MTSE_OK;
 }
 
-t_stat sim_tape_sprecsr_a (UNIT *uptr, uint32 count, uint32 *skipped, TAPE_PCALLBACK callback)
+t_stat sim_tape_sprecsr_a (UNIT* uptr, uint32 count, uint32* skipped, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_sprecsr (uptr, count, skipped);
-AIO_CALL(TOP_SRSR, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_sprecsr (uptr, count, skipped);
+	AIO_CALL (TOP_SRSR, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Space files forward by record
@@ -2145,57 +2145,57 @@ return r;
    data record error    updated
 */
 
-t_stat sim_tape_spfilebyrecf (UNIT *uptr, uint32 count, uint32 *skipped, uint32 *recsskipped, t_bool check_leot)
+t_stat sim_tape_spfilebyrecf (UNIT* uptr, uint32 count, uint32* skipped, uint32* recsskipped, t_bool check_leot)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat st;
-t_bool last_tapemark = FALSE;
-uint32 filerecsskipped;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat st;
+	t_bool last_tapemark = FALSE;
+	uint32 filerecsskipped;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_spfilebyrecf(unit=%d, count=%d, check_leot=%d)\n", (int)(uptr-ctx->dptr->units), count, check_leot);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_spfilebyrecf(unit=%d, count=%d, check_leot=%d)\n", (int) (uptr - ctx->dptr->units), count, check_leot);
 
-if (check_leot) {
-    t_mtrlnt rbc;
+	if (check_leot) {
+		t_mtrlnt rbc;
 
-    st = sim_tape_rdrlrev (uptr, &rbc);
-    last_tapemark = (MTSE_TMK == st);
-    if ((st == MTSE_OK) || (st == MTSE_TMK))
-        sim_tape_rdrlfwd (uptr, &rbc);
-    }
-*skipped = 0;
-*recsskipped = 0;
-while (*skipped < count) {                              /* loopo */
-    while (1) {
-        st = sim_tape_sprecsf (uptr, 0x1ffffff, &filerecsskipped);/* spc recs */
-        *recsskipped += filerecsskipped;
-        if (st != MTSE_OK)
-            break;
-        }
-    if (st == MTSE_TMK) {
-        *skipped = *skipped + 1;                        /* # files skipped */
-        if (check_leot && (filerecsskipped == 0) && last_tapemark) {
-            uint32 filefileskipped;
-            sim_tape_spfilebyrecr (uptr, 1, &filefileskipped, &filerecsskipped);
-            *skipped = *skipped - 1;                    /* adjust # files skipped */
-            return MTSE_LEOT;
-            }
-        last_tapemark = TRUE;
-        }
-    else
-        return st;
-    }
-return MTSE_OK;
+		st = sim_tape_rdrlrev (uptr, &rbc);
+		last_tapemark = (MTSE_TMK == st);
+		if ((st == MTSE_OK) || (st == MTSE_TMK))
+			sim_tape_rdrlfwd (uptr, &rbc);
+	}
+	*skipped = 0;
+	*recsskipped = 0;
+	while (*skipped < count) {                              /* loopo */
+		while (1) {
+			st = sim_tape_sprecsf (uptr, 0x1ffffff, &filerecsskipped);/* spc recs */
+			*recsskipped += filerecsskipped;
+			if (st != MTSE_OK)
+				break;
+		}
+		if (st == MTSE_TMK) {
+			*skipped = *skipped + 1;                        /* # files skipped */
+			if (check_leot && (filerecsskipped == 0) && last_tapemark) {
+				uint32 filefileskipped;
+				sim_tape_spfilebyrecr (uptr, 1, &filefileskipped, &filerecsskipped);
+				*skipped = *skipped - 1;                    /* adjust # files skipped */
+				return MTSE_LEOT;
+			}
+			last_tapemark = TRUE;
+		}
+		else
+			return st;
+	}
+	return MTSE_OK;
 }
 
-t_stat sim_tape_spfilebyrecf_a (UNIT *uptr, uint32 count, uint32 *skipped, uint32 *recsskipped, t_bool check_leot, TAPE_PCALLBACK callback)
+t_stat sim_tape_spfilebyrecf_a (UNIT* uptr, uint32 count, uint32* skipped, uint32* recsskipped, t_bool check_leot, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_spfilebyrecf (uptr, count, skipped, recsskipped, check_leot);
-AIO_CALL(TOP_SFRF, NULL, skipped, recsskipped, check_leot, count, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_spfilebyrecf (uptr, count, skipped, recsskipped, check_leot);
+	AIO_CALL (TOP_SFRF, NULL, skipped, recsskipped, check_leot, count, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Space files forward
@@ -2217,25 +2217,25 @@ return r;
    data record error    updated
 */
 
-t_stat sim_tape_spfilef (UNIT *uptr, uint32 count, uint32 *skipped)
+t_stat sim_tape_spfilef (UNIT* uptr, uint32 count, uint32* skipped)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-uint32 totalrecsskipped;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	uint32 totalrecsskipped;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_spfilef(unit=%d, count=%d)\n", (int)(uptr-ctx->dptr->units), count);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_spfilef(unit=%d, count=%d)\n", (int) (uptr - ctx->dptr->units), count);
 
-return sim_tape_spfilebyrecf (uptr, count, skipped, &totalrecsskipped, FALSE);
+	return sim_tape_spfilebyrecf (uptr, count, skipped, &totalrecsskipped, FALSE);
 }
 
-t_stat sim_tape_spfilef_a (UNIT *uptr, uint32 count, uint32 *skipped, TAPE_PCALLBACK callback)
+t_stat sim_tape_spfilef_a (UNIT* uptr, uint32 count, uint32* skipped, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_spfilef (uptr, count, skipped);
-AIO_CALL(TOP_SPFF, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_spfilef (uptr, count, skipped);
+	AIO_CALL (TOP_SPFF, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Space files reverse by record
@@ -2259,40 +2259,40 @@ return r;
    data record          updated
 */
 
-t_stat sim_tape_spfilebyrecr (UNIT *uptr, uint32 count, uint32 *skipped, uint32 *recsskipped)
+t_stat sim_tape_spfilebyrecr (UNIT* uptr, uint32 count, uint32* skipped, uint32* recsskipped)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat st;
-uint32 filerecsskipped;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat st;
+	uint32 filerecsskipped;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_spfilebyrecr(unit=%d, count=%d)\n", (int)(uptr-ctx->dptr->units), count);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_spfilebyrecr(unit=%d, count=%d)\n", (int) (uptr - ctx->dptr->units), count);
 
-*skipped = 0;
-*recsskipped = 0;
-while (*skipped < count) {                              /* loopo */
-    while (1) {
-        st = sim_tape_sprecsr (uptr, 0x1ffffff, &filerecsskipped);/* spc recs rev */
-        *recsskipped += filerecsskipped;
-        if (st != MTSE_OK)
-            break;
-        }
-    if (st == MTSE_TMK)
-        *skipped = *skipped + 1;                        /* # files skipped */
-    else
-        return st;
-    }
-return MTSE_OK;
+	*skipped = 0;
+	*recsskipped = 0;
+	while (*skipped < count) {                              /* loopo */
+		while (1) {
+			st = sim_tape_sprecsr (uptr, 0x1ffffff, &filerecsskipped);/* spc recs rev */
+			*recsskipped += filerecsskipped;
+			if (st != MTSE_OK)
+				break;
+		}
+		if (st == MTSE_TMK)
+			*skipped = *skipped + 1;                        /* # files skipped */
+		else
+			return st;
+	}
+	return MTSE_OK;
 }
 
-t_stat sim_tape_spfilebyrecr_a (UNIT *uptr, uint32 count, uint32 *skipped, uint32 *recsskipped, TAPE_PCALLBACK callback)
+t_stat sim_tape_spfilebyrecr_a (UNIT* uptr, uint32 count, uint32* skipped, uint32* recsskipped, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_spfilebyrecr (uptr, count, skipped, recsskipped);
-AIO_CALL(TOP_SPFR, NULL, skipped, recsskipped, 0, count, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_spfilebyrecr (uptr, count, skipped, recsskipped);
+	AIO_CALL (TOP_SPFR, NULL, skipped, recsskipped, 0, count, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Space files reverse
@@ -2315,133 +2315,133 @@ return r;
    data record          updated
 */
 
-t_stat sim_tape_spfiler (UNIT *uptr, uint32 count, uint32 *skipped)
+t_stat sim_tape_spfiler (UNIT* uptr, uint32 count, uint32* skipped)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-uint32 totalrecsskipped;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	uint32 totalrecsskipped;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_spfiler(unit=%d, count=%d)\n", (int)(uptr-ctx->dptr->units), count);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_spfiler(unit=%d, count=%d)\n", (int) (uptr - ctx->dptr->units), count);
 
-return sim_tape_spfilebyrecr (uptr, count, skipped, &totalrecsskipped);
+	return sim_tape_spfilebyrecr (uptr, count, skipped, &totalrecsskipped);
 }
 
-t_stat sim_tape_spfiler_a (UNIT *uptr, uint32 count, uint32 *skipped, TAPE_PCALLBACK callback)
+t_stat sim_tape_spfiler_a (UNIT* uptr, uint32 count, uint32* skipped, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_spfiler (uptr, count, skipped);
-AIO_CALL(TOP_SPFR, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_spfiler (uptr, count, skipped);
+	AIO_CALL (TOP_SPFR, NULL, skipped, NULL, 0, count, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Rewind tape */
 
-t_stat sim_tape_rewind (UNIT *uptr)
+t_stat sim_tape_rewind (UNIT* uptr)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
 
-if (uptr->flags & UNIT_ATT) {
-    if (ctx == NULL)                                    /* if not properly attached? */
-        return sim_messagef (SCPE_IERR, "Bad Attach\n");/*   that's a problem */
-    sim_debug (ctx->dbit, ctx->dptr, "sim_tape_rewind(unit=%d)\n", (int)(uptr-ctx->dptr->units));
-    }
-uptr->pos = 0;
-MT_CLR_PNU (uptr);
-return MTSE_OK;
+	if (uptr->flags & UNIT_ATT) {
+		if (ctx == NULL)                                    /* if not properly attached? */
+			return sim_messagef (SCPE_IERR, "Bad Attach\n");/*   that's a problem */
+		sim_debug_unit (ctx->dbit, uptr, "sim_tape_rewind(unit=%d)\n", (int) (uptr - ctx->dptr->units));
+	}
+	uptr->pos = 0;
+	MT_CLR_PNU (uptr);
+	return MTSE_OK;
 }
 
-t_stat sim_tape_rewind_a (UNIT *uptr, TAPE_PCALLBACK callback)
+t_stat sim_tape_rewind_a (UNIT* uptr, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_rewind (uptr);
-AIO_CALL(TOP_RWND, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_rewind (uptr);
+	AIO_CALL (TOP_RWND, NULL, NULL, NULL, 0, 0, 0, 0, NULL, callback);
+	return r;
 }
 
 /* Position Tape */
 
-t_stat sim_tape_position (UNIT *uptr, uint32 flags, uint32 recs, uint32 *recsskipped, uint32 files, uint32 *filesskipped, uint32 *objectsskipped)
+t_stat sim_tape_position (UNIT* uptr, uint32 flags, uint32 recs, uint32* recsskipped, uint32 files, uint32* filesskipped, uint32* objectsskipped)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
-t_stat r = MTSE_OK;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
+	t_stat r = MTSE_OK;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_position(unit=%d, flags=0x%X, recs=%d, files=%d)\n", (int)(uptr-ctx->dptr->units), flags, recs, files);
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_position(unit=%d, flags=0x%X, recs=%d, files=%d)\n", (int) (uptr - ctx->dptr->units), flags, recs, files);
 
-*recsskipped = *filesskipped = *objectsskipped = 0;
-if (flags & MTPOS_M_REW)
-    r = sim_tape_rewind (uptr);
-if (r != MTSE_OK)
-    return r;
-if (flags & MTPOS_M_OBJ) {
-    uint32 objs = recs;
-    uint32 skipped;
-    uint32 objsremaining = objs;
+	*recsskipped = *filesskipped = *objectsskipped = 0;
+	if (flags & MTPOS_M_REW)
+		r = sim_tape_rewind (uptr);
+	if (r != MTSE_OK)
+		return r;
+	if (flags & MTPOS_M_OBJ) {
+		uint32 objs = recs;
+		uint32 skipped;
+		uint32 objsremaining = objs;
 
-    while (*objectsskipped < objs) {                       /* loopo */
-        if (flags & MTPOS_M_REV)                        /* reverse? */
-            r = sim_tape_sprecsr (uptr, objsremaining, &skipped);
-        else
-            r = sim_tape_sprecsf (uptr, objsremaining, &skipped);
-        objsremaining = objsremaining - (skipped + ((r == MTSE_TMK) ? 1 : 0));
-        if ((r == MTSE_TMK) || (r == MTSE_OK))
-            *objectsskipped = *objectsskipped + skipped + ((r == MTSE_TMK) ? 1 : 0);
-        else
-            return r;
-        }
-    r = MTSE_OK;
-    }
-else {
-    uint32 fileskiprecs;
+		while (*objectsskipped < objs) {                       /* loopo */
+			if (flags & MTPOS_M_REV)                        /* reverse? */
+				r = sim_tape_sprecsr (uptr, objsremaining, &skipped);
+			else
+				r = sim_tape_sprecsf (uptr, objsremaining, &skipped);
+			objsremaining = objsremaining - (skipped + ((r == MTSE_TMK) ? 1 : 0));
+			if ((r == MTSE_TMK) || (r == MTSE_OK))
+				*objectsskipped = *objectsskipped + skipped + ((r == MTSE_TMK) ? 1 : 0);
+			else
+				return r;
+		}
+		r = MTSE_OK;
+	}
+	else {
+		uint32 fileskiprecs;
 
-    if (flags & MTPOS_M_REV)                            /* reverse? */
-        r = sim_tape_spfilebyrecr (uptr, files, filesskipped, &fileskiprecs);
-    else
-        r = sim_tape_spfilebyrecf (uptr, files, filesskipped, &fileskiprecs, (flags & MTPOS_M_DLE));
-    if (r != MTSE_OK)
-        return r;
-    if (flags & MTPOS_M_REV)                            /* reverse? */
-        r = sim_tape_sprecsr (uptr, recs, recsskipped);
-    else
-        r = sim_tape_sprecsf (uptr, recs, recsskipped);
-    if (r == MTSE_TMK)
-        *filesskipped = *filesskipped + 1;
-    *objectsskipped = fileskiprecs + *filesskipped + *recsskipped;
-    }
-return r;
+		if (flags & MTPOS_M_REV)                            /* reverse? */
+			r = sim_tape_spfilebyrecr (uptr, files, filesskipped, &fileskiprecs);
+		else
+			r = sim_tape_spfilebyrecf (uptr, files, filesskipped, &fileskiprecs, (flags & MTPOS_M_DLE));
+		if (r != MTSE_OK)
+			return r;
+		if (flags & MTPOS_M_REV)                            /* reverse? */
+			r = sim_tape_sprecsr (uptr, recs, recsskipped);
+		else
+			r = sim_tape_sprecsf (uptr, recs, recsskipped);
+		if (r == MTSE_TMK)
+			*filesskipped = *filesskipped + 1;
+		*objectsskipped = fileskiprecs + *filesskipped + *recsskipped;
+	}
+	return r;
 }
 
-t_stat sim_tape_position_a (UNIT *uptr, uint32 flags, uint32 recs, uint32 *recsskipped, uint32 files, uint32 *filesskipped, uint32 *objectsskipped, TAPE_PCALLBACK callback)
+t_stat sim_tape_position_a (UNIT* uptr, uint32 flags, uint32 recs, uint32* recsskipped, uint32 files, uint32* filesskipped, uint32* objectsskipped, TAPE_PCALLBACK callback)
 {
-t_stat r = MTSE_OK;
-AIO_CALLSETUP
-    r = sim_tape_position (uptr, flags, recs, recsskipped, files, filesskipped, objectsskipped);
-AIO_CALL(TOP_POSN, NULL, recsskipped, filesskipped, 0, flags, recs, files, objectsskipped, callback);
-return r;
+	t_stat r = MTSE_OK;
+	AIO_CALLSETUP
+		r = sim_tape_position (uptr, flags, recs, recsskipped, files, filesskipped, objectsskipped);
+	AIO_CALL (TOP_POSN, NULL, recsskipped, filesskipped, 0, flags, recs, files, objectsskipped, callback);
+	return r;
 }
 
 /* Reset tape */
 
-t_stat sim_tape_reset (UNIT *uptr)
+t_stat sim_tape_reset (UNIT* uptr)
 {
-struct tape_context *ctx = (struct tape_context *)uptr->tape_ctx;
+	struct tape_context* ctx = (struct tape_context*) uptr->tape_ctx;
 
-MT_CLR_PNU (uptr);
-if (!(uptr->flags & UNIT_ATT))                          /* attached? */
-    return SCPE_OK;
+	MT_CLR_PNU (uptr);
+	if (!(uptr->flags & UNIT_ATT))                          /* attached? */
+		return SCPE_OK;
 
-if (ctx == NULL)                                        /* if not properly attached? */
-    return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
-sim_debug (ctx->dbit, ctx->dptr, "sim_tape_reset(unit=%d)\n", (int)(uptr-ctx->dptr->units));
+	if (ctx == NULL)                                        /* if not properly attached? */
+		return sim_messagef (SCPE_IERR, "Bad Attach\n");    /*   that's a problem */
+	sim_debug_unit (ctx->dbit, uptr, "sim_tape_reset(unit=%d)\n", (int) (uptr - ctx->dptr->units));
 
-_sim_tape_io_flush(uptr);
-AIO_VALIDATE;
-AIO_UPDATE_QUEUE;
-return SCPE_OK;
+	_sim_tape_io_flush (uptr);
+	AIO_VALIDATE;
+	AIO_UPDATE_QUEUE;
+	return SCPE_OK;
 }
 
 /* Test for BOT */

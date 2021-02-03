@@ -2307,41 +2307,59 @@ return SCPE_OK;
 
 /* Show debug routine */
 
-t_stat sim_show_debug (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONST char *cptr)
+t_stat sim_show_debug (FILE* st, DEVICE* dptr, UNIT* uptr, int32 flag, CONST char* cptr)
 {
-int32 i;
+	int32 i;
 
-if (cptr && (*cptr != 0))
-    return SCPE_2MARG;
-if (sim_deb) {
-    fprintf (st, "Debug output enabled to \"%s\"\n", 
-                 sim_logfile_name (sim_deb, sim_deb_ref));
-    if (sim_deb_switches & SWMASK ('P'))
-        fprintf (st, "   Debug messages contain current PC value\n");
-    if (sim_deb_switches & SWMASK ('T'))
-        fprintf (st, "   Debug messages display time of day as hh:mm:ss.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
-    if (sim_deb_switches & SWMASK ('A'))
-        fprintf (st, "   Debug messages display time of day as seconds.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
-    for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
-        if (!(dptr->flags & DEV_DIS) &&
-            ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) &&
-            (dptr->dctrl)) {
-            fprintf (st, "Device: %-6s ", dptr->name);
-            show_dev_debug (st, dptr, NULL, 0, NULL);
-            }
-        }
-    for (i = 0; sim_internal_device_count && (dptr = sim_internal_devices[i]); ++i) {
-        if (!(dptr->flags & DEV_DIS) &&
-            ((dptr->flags & DEV_DEBUG) || (dptr->debflags)) &&
-            (dptr->dctrl)) {
-            fprintf (st, "Device: %-6s ", dptr->name);
-            show_dev_debug (st, dptr, NULL, 0, NULL);
-            }
-        }
-    }
-else
-    fprintf (st, "Debug output disabled\n");
-return SCPE_OK;
+	if (cptr && (*cptr != 0))
+		return SCPE_2MARG;
+	if (sim_deb) {
+		fprintf (st, "Debug output enabled to \"%s\"\n",
+			sim_logfile_name (sim_deb, sim_deb_ref));
+		if (sim_deb_switches & SWMASK ('P'))
+			fprintf (st, "   Debug messages contain current PC value\n");
+		if (sim_deb_switches & SWMASK ('T'))
+			fprintf (st, "   Debug messages display time of day as hh:mm:ss.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
+		if (sim_deb_switches & SWMASK ('A'))
+			fprintf (st, "   Debug messages display time of day as seconds.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
+		for (i = 0; (dptr = sim_devices[i]) != NULL; i++) {
+			t_bool unit_debug = FALSE;
+			uint32 unit;
+
+			for (unit = 0; unit < dptr->numunits; unit++)
+				if (dptr->units[unit].dctrl) {
+					unit_debug = TRUE;
+					break;
+				}
+
+			if (!(dptr->flags & DEV_DIS) &&
+				((dptr->flags & DEV_DEBUG) || (dptr->debflags)) &&
+				((dptr->dctrl) || unit_debug)) {
+				fprintf (st, "Device: %-6s ", dptr->name);
+				show_dev_debug (st, dptr, NULL, 0, NULL);
+			}
+		}
+		for (i = 0; sim_internal_device_count && (dptr = sim_internal_devices[i]); ++i) {
+			t_bool unit_debug = FALSE;
+			uint32 unit;
+
+			for (unit = 0; unit < dptr->numunits; unit++)
+				if (dptr->units[unit].dctrl) {
+					unit_debug = TRUE;
+					break;
+				}
+
+			if (!(dptr->flags & DEV_DIS) &&
+				((dptr->flags & DEV_DEBUG) || (dptr->debflags)) &&
+				((dptr->dctrl) || unit_debug)) {
+				fprintf (st, "Device: %-6s ", dptr->name);
+				show_dev_debug (st, dptr, NULL, 0, NULL);
+			}
+		}
+	}
+	else
+		fprintf (st, "Debug output disabled\n");
+	return SCPE_OK;
 }
 
 /* SET CONSOLE command */
