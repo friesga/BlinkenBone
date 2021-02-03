@@ -929,7 +929,7 @@ if (lp->destination || lp->port || lp->txlogname) {
             char portname[CBUFSIZE];
 
             get_glyph_nc (lp->destination, portname, ';');
-            sprintf (growstring(&tptr, 25 + strlen (lp->destination)), ",Connect=%s%s%s", portname, strcmp("9600-8N1", lp->serconfig) ? ";" : "", strcmp("9600-8N1", lp->serconfig) ? lp->serconfig : "");
+            sprintf (growstring (&tptr, 25 + strlen (lp->destination)), ",Connect=%s%s%s", portname, strcmp ("9600-8N1", lp->serconfig ? lp->serconfig : "") ? ";" : "", strcmp ("9600-8N1", lp->serconfig ? lp->serconfig : "") ? lp->serconfig : "");
             }
         else
             sprintf (growstring(&tptr, 25 + strlen (lp->destination)), ",Connect=%s%s", lp->destination, ((lp->mp->notelnet != lp->notelnet) && (!lp->datagram)) ? (lp->notelnet ? ";notelnet" : ";telnet") : "");
@@ -1426,16 +1426,16 @@ return tmxr_clear_modem_control_passthru_state (mp, FALSE);
    we've got to reject the attempt to set or clear this mode if any 
    ports on the MUX are attached.
 */
-t_stat tmxr_set_port_speed_control (TMXR *mp)
+t_stat tmxr_set_port_speed_control (TMXR* mp)
 {
-int i;
+	int i;
 
-if (mp->uptr && !(mp->uptr->flags & UNIT_ATT))
-    return sim_messagef (SCPE_ALATT, "Can't change speed mode while attached.\n:");
-mp->port_speed_control = TRUE;
-for (i=0; i<mp->lines; ++i)
-    mp->ldsc[i].port_speed_control = mp->port_speed_control;
-return SCPE_OK;
+	if (!mp->port_speed_control && mp->uptr && !(mp->uptr->flags & UNIT_ATT))
+		return sim_messagef (SCPE_ALATT, "Can't change speed mode while attached.\n:");
+	mp->port_speed_control = TRUE;
+	for (i = 0; i < mp->lines; ++i)
+		mp->ldsc[i].port_speed_control = mp->port_speed_control;
+	return SCPE_OK;
 }
 
 /* Declare that tmxr_set_config_line is not used.
@@ -2440,38 +2440,40 @@ while (1) {
 return -1;
 }
 
-t_stat tmxr_set_line_speed (TMLN *lp, CONST char *speed)
+t_stat tmxr_set_line_speed (TMLN* lp, CONST char* speed)
 {
-UNIT *uptr;
-CONST char *cptr;
-t_stat r;
+	UNIT* uptr;
+	CONST char* cptr;
+	t_stat r;
 
-if (!speed || !*speed)
-    return SCPE_2FARG;
-if (_tmln_speed_delta (speed) < 0)
-    return SCPE_ARG;
-lp->rxbps = (uint32)strtotv (speed, &cptr, 10);
-if (*cptr == '*') {
-    uint32 rxbpsfactor = (uint32) get_uint (cptr+1, 10, 32, &r);
-    if (r != SCPE_OK)
-        return r;
-    lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE * rxbpsfactor;
-    }
-if ((lp->serport) && (lp->rxbpsfactor != 0.0))
-    lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE;
-lp->rxdelta = _tmln_speed_delta (speed);
-lp->rxnexttime = 0.0;
-uptr = lp->uptr;
-if ((!uptr) && (lp->mp))
-    uptr = lp->mp->uptr;
-if (uptr)
-    uptr->wait = lp->rxdelta;
-if (lp->rxbpsfactor == 0.0)
-    lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE;
-lp->txbps = lp->rxbps;
-lp->txdelta = lp->rxdelta;
-lp->txnexttime = lp->rxnexttime;
-return SCPE_OK;
+	if (!speed || !*speed)
+		return SCPE_2FARG;
+	if (_tmln_speed_delta (speed) < 0)
+		return SCPE_ARG;
+	lp->rxbps = (uint32) strtotv (speed, &cptr, 10);
+	if (*cptr == '*') {
+		uint32 rxbpsfactor = (uint32) get_uint (cptr + 1, 10, 32, &r);
+		if (r != SCPE_OK)
+			return r;
+		lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE * rxbpsfactor;
+	}
+	if ((lp->serport) && (lp->rxbpsfactor != 0.0))
+		lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE;
+	lp->rxdelta = _tmln_speed_delta (speed);
+	lp->rxnexttime = 0.0;
+	uptr = lp->uptr;
+	if ((!uptr) && (lp->mp))
+		uptr = lp->mp->uptr;
+	if (uptr)
+		uptr->wait = lp->rxdelta;
+	if (lp->rxbpsfactor == 0.0)
+		lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE;
+	lp->txbps = lp->rxbps;
+	lp->txdelta = lp->rxdelta;
+	lp->txnexttime = lp->rxnexttime;
+	if (lp->o_uptr)
+		lp->o_uptr->wait = lp->txdelta;
+	return SCPE_OK;
 }
 
 
@@ -3836,6 +3838,7 @@ else {
     for (i=0; i<tmxr_open_device_count; ++i) {
         TMXR *mp = tmxr_open_devices[i];
         TMLN *lp;
+        UNIT* o_uptr = mp->ldsc[0].o_uptr;
         char *attach;
 
         fprintf(st, "Multiplexer device: %s", (mp->dptr ? sim_dname (mp->dptr) : ""));
@@ -4500,7 +4503,7 @@ if ((lp->sock) || (lp->connecting)) {                   /* tcp connection? */
         fprintf (st, "Connection from IP address %s\n", lp->ipad);
     }
 else
-    if (lp->destination)                                /* remote connection? */
+if ((lp->destination) && (!lp->serport))            /* remote connection? */
         fprintf (st, "Connecting to remote port %s\n", lp->destination);/* print port name */
 if (lp->sock) {
     char *sockname, *peername;

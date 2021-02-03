@@ -2006,10 +2006,15 @@ static const char simh_help[] =
       " and a numeric comparison is performed. For example: \"+1\" EQU \"1\" will be\n"
       " true.\n"
       "5File Existence Expressions\n"
-      " File existence can be determined with:\n"
+      " File existence can be determined with:\n\n"
       "++{NOT} EXIST \"<filespec>\"\n\n"
       "++{NOT} EXIST <filespec>\n\n"
       " Specifies a true (false {NOT}) condition if the file exists.\n"
+      "5File Comparison Expressions\n"
+      " Files can have their contents compared with:\n\n"
+      "++-D {NOT} \"<filespec1>\" == \"<filespec2>\" \n\n"
+      " Specifies a true (false {NOT}) condition if the indicated files\n"
+      " have the same contents.\n\n"
        /***************** 80 character line width template *************************/
 #define HLP_EXIT        "*Commands Exiting_The_Simulator"
       "2Exiting The Simulator\n"
@@ -3830,7 +3835,7 @@ CONST char *tptr, *gptr;
 REG *rptr;
 
 tptr = (CONST char *)get_glyph_gen (iptr, optr, mchar, (sim_switches & SWMASK ('I')), TRUE, '\\');
-if (*optr != '"') {
+if ((*optr != '"') && (*optr != '\'')) {
     ap = getenv (optr);
     if (!ap)
         return tptr;
@@ -5737,7 +5742,7 @@ if (dir) {
 #endif
     t_offset FileSize;
     char FileName[PATH_MAX + 1];
-    char *MatchName = 1 + strrchr (cptr, '/');;
+    const char *MatchName = 1 + strrchr (cptr, '/');;
     char *p_name;
     struct tm *local;
 #if defined (HAVE_GLOB)
@@ -6339,7 +6344,9 @@ if ((sim_switches & SWMASK ('R')) ||                    /* read only? */
     if (uptr->fileref == NULL)                          /* open fail? */
         return attach_err (uptr, SCPE_OPENERR);         /* yes, error */
     uptr->flags = uptr->flags | UNIT_RO;                /* set rd only */
-    sim_messagef (SCPE_OK, "%s: unit is read only\n", sim_dname (dptr));
+    if (!(uptr->flags & UNIT_RO))
+        sim_messagef (SCPE_OK, "%s: unit is read only\n", sim_dname (dptr));
+    uptr->flags = uptr->flags | UNIT_RO;                /* set rd only */
     }
 else {
     if (sim_switches & SWMASK ('N')) {                  /* new file only? */
@@ -6509,7 +6516,7 @@ if ((uptr->flags & UNIT_BUF) && (uptr->filebuf)) {
         }
     uptr->flags = uptr->flags & ~UNIT_BUF;
     }
-uptr->flags = uptr->flags & ~(UNIT_ATT | UNIT_RO);
+uptr->flags = uptr->flags & ~(UNIT_ATT | ((uptr->flags & UNIT_ROABLE) ? UNIT_RO : 0));
 free (uptr->filename);
 uptr->filename = NULL;
 if (fclose (uptr->fileref) == EOF)
@@ -11747,7 +11754,15 @@ char pc_s[64] = "";
 struct timespec time_now;
 
 if (sim_deb_switches & (SWMASK ('T') | SWMASK ('R') | SWMASK ('A'))) {
+    struct tm loc_tm, gmt_tm;
+
     clock_gettime(CLOCK_REALTIME, &time_now);
+
+    /* Adjust the relative timebase to reflect the localtime GMT offset */
+    loc_tm = *localtime (&sim_deb_basetime.tv_sec);
+    gmt_tm = *gmtime (&sim_deb_basetime.tv_sec);
+    sim_deb_basetime.tv_sec -= mktime (&gmt_tm) - mktime (&loc_tm);
+
     if (sim_deb_switches & SWMASK ('R'))
         sim_timespec_diff (&time_now, &time_now, &sim_deb_basetime);
     if (sim_deb_switches & SWMASK ('T')) {

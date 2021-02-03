@@ -2820,27 +2820,25 @@ return SCPE_OK;
 
 t_stat sim_putchar_s (int32 c)
 {
-t_stat r;
+	t_stat r;
 
-sim_exp_check (&sim_con_expect, c);
-if ((sim_con_tmxr.master == 0) &&                       /* not Telnet? */
-    (sim_con_ldsc.serport == 0)) {                      /* and not serial port */
-    if (sim_log)                                        /* log file? */
-        fputc (c, sim_log);
-    sim_debug (DBG_XMT, &sim_con_telnet, "sim_putchar('%c' (0x%02X)\n", sim_isprint (c) ? c : '.', c);
-    return sim_os_putchar (c);                          /* in-window version */
-    }
-if (!sim_con_ldsc.conn) {                               /* no Telnet or serial connection? */
-    if (!sim_con_ldsc.txbfd)                            /* non-buffered Telnet connection? */
-        return SCPE_LOST;                               /* lost */
-    if (tmxr_poll_conn (&sim_con_tmxr) >= 0)            /* poll connect */
-        sim_con_ldsc.rcve = 1;                          /* rcv enabled */
-    }
-if (sim_con_ldsc.xmte == 0)                             /* xmt disabled? */
-    r = SCPE_STALL;
-else r = tmxr_putc_ln (&sim_con_ldsc, c);               /* no, Telnet output */
-tmxr_poll_tx (&sim_con_tmxr);                           /* poll xmt */
-return r;                                               /* return status */
+	sim_exp_check (&sim_con_expect, c);
+	if ((sim_con_tmxr.master == 0) &&                       /* not Telnet? */
+		(sim_con_ldsc.serport == 0)) {                      /* and not serial port */
+		if (sim_log)                                        /* log file? */
+			fputc (c, sim_log);
+		sim_debug (DBG_XMT, &sim_con_telnet, "sim_putchar('%c' (0x%02X)\n", sim_isprint (c) ? c : '.', c);
+		return sim_os_putchar (c);                          /* in-window version */
+	}
+	if (!sim_con_ldsc.conn) {                               /* no Telnet or serial connection? */
+		if (!sim_con_ldsc.txbfd)                            /* non-buffered Telnet connection? */
+			return SCPE_LOST;                               /* lost */
+		if (tmxr_poll_conn (&sim_con_tmxr) >= 0)            /* poll connect */
+			sim_con_ldsc.rcve = 1;                          /* rcv enabled */
+	}
+	r = tmxr_putc_ln (&sim_con_ldsc, c);                    /* no, Telnet output */
+	tmxr_poll_tx (&sim_con_tmxr);                           /* poll xmt */
+	return r;                                               /* return status */
 }
 
 /* Input character processing */
