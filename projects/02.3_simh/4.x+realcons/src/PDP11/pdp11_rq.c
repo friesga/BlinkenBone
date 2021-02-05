@@ -693,10 +693,45 @@ struct drvtyp {
     int32       rctc;                                   /* RCT copies */
     int32       rbn;                                    /* RBNs */
     uint16      mod;                                    /* MSCP model */
+    int32       MediaId;                                /* MSCP media */
     int32       med;                                    /* MSCP media */
     int32       flgs;                                   /* flags */
     const char  *name;                                  /* name */
     };
+
+/*
+
+MediaId
+
+Is defined in the MSCP Basic Disk Functions Manual, page 4-37 to 4-38:
+
+The media type identifier is a 32-bit number, and it's coded like this:
+The high 25 bits are 5 characters, each coded with 5 bits. The low 7
+bits is a binary coded 2 digits.
+
+Looking at it, you have:
+D0,D1,A0,A1,A2,N
+
+For an RA81, it would be:
+
+D0,D1 is the preferred device type name for the unit. In our case,
+that would be "DU".
+A0,A1,A2 is the name of the media used on the unit. In our case "RA".
+N is the value of the two decimal digits, so 81 for this example.
+
+And for letters, the coding is that A=1, B=2 and so on. 0 means the
+character is not used.
+
+So, again, for an RA81, we would get:
+
+Decimal Values:        4,    21,    18,     1,     0,      81
+Hex Values:            4,    15,    12,     1,     0,      51
+Binary Values:     00100, 10101, 10010, 00001, 00000, 1010001
+Hex 4 bit Nibbles:    2     5     6     4   1     0     5   1
+
+The 32bit value of RA81_MED is 0x25641051
+
+ */
 
 #define RQ_DRV(d) \
   { d##_SECT, d##_SURF, d##_CYL,  d##_TPG, \
@@ -2414,9 +2449,9 @@ t_bool rq_una (MSC* cp, uint16 lu)
 	uint16 pkt;
 	UNIT* uptr = rq_getucb (cp, lu);
 
-	sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_una (%s. Unit=%d)\n", sim_uname (uptr), lu);
 	if (uptr == NULL)                                       /* huh? */
 		return OK;
+    sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_una (%s. Unit=%d)\n", sim_uname (uptr), lu);
 	if (!rq_deqf (cp, &pkt))                                /* get log pkt */
 		return ERR;
 	cp->pak[pkt].d[RSP_REFL] = 0;                           /* ref = 0 */
@@ -2619,29 +2654,29 @@ return;
 
 /* Unit response fields */
 
-void rq_putr_unit (MSC *cp, uint16 pkt, UNIT *uptr, uint16 lu, t_bool all)
+void rq_putr_unit (MSC* cp, uint16 pkt, UNIT* uptr, uint16 lu, t_bool all)
 {
-uint32 dtyp = GET_DTYPE (uptr->flags);                  /* get drive type */
-uint32 maxlbn = (uint32)uptr->capac;                    /* get max lbn */
+	uint32 dtyp = GET_DTYPE (uptr->flags);                  /* get drive type */
+	uint32 maxlbn = (uint32) uptr->capac;                    /* get max lbn */
 
-sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_putr_unit\n");
+	sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_putr_unit\n");
 
-cp->pak[pkt].d[ONL_MLUN] = lu;                          /* unit */
-cp->pak[pkt].d[ONL_UFL] = (uint16)(uptr->uf | UF_RPL | RQ_WPH (uptr) | RQ_RMV (uptr));
-cp->pak[pkt].d[ONL_RSVL] = 0;                           /* reserved */
-cp->pak[pkt].d[ONL_RSVH] = 0;
-cp->pak[pkt].d[ONL_UIDA] = lu;                          /* UID low */
-cp->pak[pkt].d[ONL_UIDB] = 0;
-cp->pak[pkt].d[ONL_UIDC] = 0;
-cp->pak[pkt].d[ONL_UIDD] = (UID_DISK << ONL_UIDD_V_CLS) |
-    (drv_tab[dtyp].mod << ONL_UIDD_V_MOD);              /* UID hi */
-PUTP32 (pkt, ONL_MEDL, drv_tab[dtyp].med);              /* media type */
-if (all) {                                              /* if long form */
-    PUTP32 (pkt, ONL_SIZL, maxlbn);                     /* user LBNs */
-    cp->pak[pkt].d[ONL_VSNL] = 01234 + lu;              /* vol serial # */
-    cp->pak[pkt].d[ONL_VSNH] = 0;
-    }
-return;
+	cp->pak[pkt].d[ONL_MLUN] = lu;                          /* unit */
+	cp->pak[pkt].d[ONL_UFL] = (uint16) (uptr->uf | UF_RPL | RQ_WPH (uptr) | RQ_RMV (uptr));
+	cp->pak[pkt].d[ONL_RSVL] = 0;                           /* reserved */
+	cp->pak[pkt].d[ONL_RSVH] = 0;
+	cp->pak[pkt].d[ONL_UIDA] = lu;                          /* UID low */
+	cp->pak[pkt].d[ONL_UIDB] = 0;
+	cp->pak[pkt].d[ONL_UIDC] = 0;
+	cp->pak[pkt].d[ONL_UIDD] = (UID_DISK << ONL_UIDD_V_CLS) |
+		(drv_tab[dtyp].mod << ONL_UIDD_V_MOD);              /* UID hi */
+	PUTP32 (pkt, ONL_MEDL, drv_tab[dtyp].MediaId);          /* media type */
+	if (all) {                                              /* if long form */
+		PUTP32 (pkt, ONL_SIZL, maxlbn);                     /* user LBNs */
+		cp->pak[pkt].d[ONL_VSNL] = 01234 + lu;              /* vol serial # */
+		cp->pak[pkt].d[ONL_VSNH] = 0;
+	}
+	return;
 }
 
 /* UQ_HDR and RSP_OP fields */
@@ -2818,6 +2853,8 @@ t_stat rq_set_plug (UNIT* uptr, int32 val, CONST char* cptr, void* desc)
     t_stat r;
     DEVICE* dptr = find_dev_from_unit (uptr);
 
+    if (cptr == NULL)
+        return sim_messagef (SCPE_ARG, "Must specify UNIT=value\n");
     plug = (int32) get_uint (cptr, 10, 0xFFFFFFFF, &r);
     if ((r != SCPE_OK) || (plug > 65534))
         return sim_messagef (SCPE_ARG, "Invalid Unit Plug Number: %s\n", cptr);
@@ -3053,7 +3090,7 @@ t_stat rq_boot (int32 unitno, DEVICE* dptr)
 
     for (i = 0; i < BOOT_LEN; i++)
         M[(BOOT_START >> 1) + i] = boot_rom[i];
-    M[BOOT_UNIT >> 1] = uptr->unit_plug;
+    M[BOOT_UNIT >> 1] = (uint16) uptr->unit_plug;
     M[BOOT_CSR >> 1] = dibp->ba & DMASK;
     cpu_set_boot (BOOT_ENTRY);
     return SCPE_OK;

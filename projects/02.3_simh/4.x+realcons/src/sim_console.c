@@ -2221,44 +2221,52 @@ return SCPE_OK;
 
 /* Set debug routine */
 
-t_stat sim_set_debon (int32 flag, CONST char *cptr)
+t_stat sim_set_debon (int32 flag, CONST char* cptr)
 {
-char gbuf[CBUFSIZE];
-t_stat r;
-time_t now;
+    char gbuf[CBUFSIZE];
+    t_stat r;
+    time_t now;
 
-if ((cptr == NULL) || (*cptr == 0))                     /* need arg */
-    return SCPE_2FARG;
-cptr = get_glyph_nc (cptr, gbuf, 0);                    /* get file name */
-if (*cptr != 0)                                         /* now eol? */
-    return SCPE_2MARG;
-r = sim_open_logfile (gbuf, FALSE, &sim_deb, &sim_deb_ref);
+    if ((cptr == NULL) || (*cptr == 0))                     /* need arg */
+        return SCPE_2FARG;
+    cptr = get_glyph_nc (cptr, gbuf, 0);                    /* get file name */
+    if (*cptr != 0)                                         /* now eol? */
+        return SCPE_2MARG;
+    r = sim_open_logfile (gbuf, FALSE, &sim_deb, &sim_deb_ref);
 
-if (r != SCPE_OK)
-    return r;
+    if (r != SCPE_OK)
+        return r;
 
-sim_deb_switches = sim_switches;                        /* save debug switches */
-if (sim_deb_switches & SWMASK ('R')) {
-    clock_gettime(CLOCK_REALTIME, &sim_deb_basetime);
-    if (!(sim_deb_switches & (SWMASK ('A') | SWMASK ('T'))))
-        sim_deb_switches |= SWMASK ('T');
+    sim_deb_switches = sim_switches;                        /* save debug switches */
+    if (sim_deb_switches & SWMASK ('R')) {
+        struct tm loc_tm, gmt_tm;
+        time_t time_t_now;
+
+        clock_gettime (CLOCK_REALTIME, &sim_deb_basetime);
+        time_t_now = (time_t) sim_deb_basetime.tv_sec;
+        /* Adjust the relative timebase to reflect the localtime GMT offset */
+        loc_tm = *localtime (&time_t_now);
+        gmt_tm = *gmtime (&time_t_now);
+        sim_deb_basetime.tv_sec -= mktime (&gmt_tm) - mktime (&loc_tm);
+        if (!(sim_deb_switches & (SWMASK ('A') | SWMASK ('T'))))
+            sim_deb_switches |= SWMASK ('T');
     }
-if (!sim_quiet) {
-    sim_printf ("Debug output to \"%s\"\n", sim_logfile_name (sim_deb, sim_deb_ref));
-    if (sim_deb_switches & SWMASK ('P'))
-        sim_printf ("   Debug messages contain current PC value\n");
-    if (sim_deb_switches & SWMASK ('T'))
-        sim_printf ("   Debug messages display time of day as hh:mm:ss.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
-    if (sim_deb_switches & SWMASK ('A'))
-        sim_printf ("   Debug messages display time of day as seconds.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
-    time(&now);
-    fprintf (sim_deb, "Debug output to \"%s\" at %s", sim_logfile_name (sim_deb, sim_deb_ref), ctime(&now));
-    show_version (sim_deb, NULL, NULL, 0, NULL);
+    if (!sim_quiet) {
+        sim_printf ("Debug output to \"%s\"\n", sim_logfile_name (sim_deb, sim_deb_ref));
+        if (sim_deb_switches & SWMASK ('P'))
+            sim_printf ("   Debug messages contain current PC value\n");
+        if (sim_deb_switches & SWMASK ('T'))
+            sim_printf ("   Debug messages display time of day as hh:mm:ss.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
+        if (sim_deb_switches & SWMASK ('A'))
+            sim_printf ("   Debug messages display time of day as seconds.msec%s\n", sim_deb_switches & SWMASK ('R') ? " relative to the start of debugging" : "");
+        time (&now);
+        fprintf (sim_deb, "Debug output to \"%s\" at %s", sim_logfile_name (sim_deb, sim_deb_ref), ctime (&now));
+        show_version (sim_deb, NULL, NULL, 0, NULL);
     }
-if (sim_deb_switches & SWMASK ('N'))
-    sim_deb_switches &= ~SWMASK ('N');          /* Only process the -N flag initially */
+    if (sim_deb_switches & SWMASK ('N'))
+        sim_deb_switches &= ~SWMASK ('N');          /* Only process the -N flag initially */
 
-return SCPE_OK;
+    return SCPE_OK;
 }
 
 t_stat sim_debug_flush (void)

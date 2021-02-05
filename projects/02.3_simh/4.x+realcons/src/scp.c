@@ -4563,46 +4563,58 @@ return SCPE_OK;
 
 /* Set environment routine */
 
-t_stat sim_set_environment (int32 flag, CONST char *cptr)
+t_stat sim_set_environment (int32 flag, CONST char* cptr)
 {
-char varname[CBUFSIZE], prompt[CBUFSIZE], cbuf[CBUFSIZE];
+	char varname[CBUFSIZE], prompt[CBUFSIZE], cbuf[CBUFSIZE];
 
-if ((!cptr) || (*cptr == 0))                            /* now eol? */
-    return SCPE_2FARG;
-if (sim_switches & SWMASK ('P')) {
-    CONST char *deflt = NULL;
+	if ((!cptr) || (*cptr == 0))                            /* now eol? */
+		return SCPE_2FARG;
+	if (sim_switches & SWMASK ('P')) {
+		CONST char* deflt = NULL;
 
-    cptr = get_glyph_quoted (cptr, prompt, 0);          /* get prompt */
-    if (prompt[0] == '\0')
-        return sim_messagef (SCPE_2FARG, "Missing Prompt and Environment Variable Name\n");
-    if ((prompt[0] == '"') || (prompt[0] == '\'')) {
-        prompt[strlen (prompt) - 1] = '\0';
-        memmove (prompt, prompt + 1, strlen (prompt));
-        }
-    deflt = get_glyph (cptr, varname, '=');             /* get environment variable name */
-    if (deflt == NULL)
-        deflt = "";
-    if (*deflt) {
-        strlcat (prompt, " [", sizeof (prompt));
-        strlcat (prompt, deflt, sizeof (prompt));
-        strlcat (prompt, "] ", sizeof (prompt));
-        }
-    else
-        strlcat (prompt, " ", sizeof (prompt));
-    if (sim_rem_cmd_active_line == -1) {
-        cptr = read_line_p (prompt, cbuf, sizeof(cbuf), stdin);
-        if ((cptr == NULL) || (*cptr == 0))
-            cptr = deflt;
-        else
-            cptr = cbuf;
-        }
-    else
-        cptr = deflt;
-    }
-else
-    cptr = get_glyph (cptr, varname, '=');              /* get environment variable name */
-setenv(varname, cptr, 1);
-return SCPE_OK;
+		cptr = get_glyph_quoted (cptr, prompt, 0);          /* get prompt */
+		if (prompt[0] == '\0')
+			return sim_messagef (SCPE_2FARG, "Missing Prompt and Environment Variable Name\n");
+		if ((prompt[0] == '"') || (prompt[0] == '\'')) {
+			prompt[strlen (prompt) - 1] = '\0';
+			memmove (prompt, prompt + 1, strlen (prompt));
+		}
+		deflt = get_glyph (cptr, varname, '=');             /* get environment variable name */
+		if (deflt == NULL)
+			deflt = "";
+		if (*deflt) {
+			strlcat (prompt, " [", sizeof (prompt));
+			strlcat (prompt, deflt, sizeof (prompt));
+			strlcat (prompt, "] ", sizeof (prompt));
+		}
+		else
+			strlcat (prompt, " ", sizeof (prompt));
+		if (sim_rem_cmd_active_line == -1) {
+			cptr = read_line_p (prompt, cbuf, sizeof (cbuf), stdin);
+			if ((cptr == NULL) || (*cptr == 0))
+				cptr = deflt;
+			else
+				cptr = cbuf;
+		}
+		else
+			cptr = deflt;
+	}
+	else {
+		cptr = get_glyph (cptr, varname, '=');              /* get environment variable name */
+		strlcpy (cbuf, cptr, sizeof (cbuf));
+		sim_trim_endspc (cbuf);
+		cptr = cbuf;
+		if (sim_switches & SWMASK ('S')) {                  /* Quote String argument? */
+			uint32 str_size;
+
+			get_glyph_quoted (cptr, cbuf, 0);
+			if (SCPE_OK != sim_decode_quoted_string (cbuf, (uint8*) cbuf, &str_size))
+				return sim_messagef (SCPE_ARG, "Invalid quoted string: %s\n", cbuf);
+			cbuf[str_size] = '\0';
+		}
+	}
+	setenv (varname, cptr, 1);
+	return SCPE_OK;
 }
 
 /* Set command */
@@ -6671,21 +6683,23 @@ return (dptr ? (dptr->lname? dptr->lname: dptr->name) : "");
 
 /* Get unit display name */
 
-const char *sim_uname (UNIT *uptr)
+const char* sim_uname (UNIT* uptr)
 {
-DEVICE *d;
-char uname[CBUFSIZE];
+	DEVICE* d;
+	char uname[CBUFSIZE];
 
-if (uptr->uname)
-    return uptr->uname;
-d = find_dev_from_unit(uptr);
-if (!d)
-    return "";
-if (d->numunits == 1)
-    sprintf (uname, "%s", sim_dname (d));
-else
-    sprintf (uname, "%s%d", sim_dname (d), (int)(uptr-d->units));
-return sim_set_uname (uptr, uname);
+	if (!uptr)
+		return "";
+	if (uptr->uname)
+		return uptr->uname;
+	d = find_dev_from_unit (uptr);
+	if (!d)
+		return "";
+	if (d->numunits == 1)
+		sprintf (uname, "%s", sim_dname (d));
+	else
+		sprintf (uname, "%s%d", sim_dname (d), (int) (uptr - d->units));
+	return sim_set_uname (uptr, uname);
 }
 
 const char *sim_set_uname (UNIT *uptr, const char *uname)
@@ -7712,10 +7726,10 @@ for (gptr = gbuf, reason = SCPE_OK;
         for (highr = lowr; highr->name != NULL; highr++) ;
         sim_switches = sim_switches | SIM_SW_HIDE;
         reason = exdep_reg_loop (ofile, sim_schrptr, flag, cptr,
-            lowr, --highr, 0, 0);
+            lowr, --highr, 0, 0xFFFFFFFF);
         if ((!sim_oline) && (sim_log && (ofile == stdout)))
             exdep_reg_loop (sim_log, sim_schrptr, EX_E, cptr,
-                lowr, --highr, 0, 0);
+                lowr, --highr, 0, 0xFFFFFFFF);
         continue;
         }
 
@@ -7773,78 +7787,81 @@ return reason;
    exdep_addr_loop      examine/deposit range of addresses
 */
 
-t_stat exdep_reg_loop (FILE *ofile, SCHTAB *schptr, int32 flag, CONST char *cptr,
-    REG *lowr, REG *highr, uint32 lows, uint32 highs)
+t_stat exdep_reg_loop (FILE* ofile, SCHTAB* schptr, int32 flag, CONST char* cptr,
+    REG* lowr, REG* highr, uint32 lows, uint32 highs)
 {
-t_stat reason;
-uint32 idx, val_start=lows;
-t_value val, last_val;
-REG *rptr;
-int32 saved_switches = sim_switches;
+    t_stat reason;
+    uint32 idx, val_start = lows, limits;
+    t_value val, last_val;
+    REG* rptr;
+    int32 saved_switches = sim_switches;
 
-if ((lowr == NULL) || (highr == NULL))
-    return SCPE_IERR;
-if (lowr > highr)
-    return SCPE_ARG;
-for (rptr = lowr; rptr <= highr; rptr++) {
-    if ((sim_switches & SIM_SW_HIDE) &&
-        (rptr->flags & REG_HIDDEN))
-        continue;
-    val = last_val = 0;
-    for (idx = lows; idx <= highs; idx++) {
-        if (idx >= rptr->depth)
-            return SCPE_SUB;
-        sim_eval[0] = val = get_rval (rptr, idx);
-        sim_switches = saved_switches;
-        if (schptr && !test_search (sim_eval, schptr))
+    if ((lowr == NULL) || (highr == NULL))
+        return SCPE_IERR;
+    if (lowr > highr)
+        return SCPE_ARG;
+    for (rptr = lowr; rptr <= highr; rptr++) {
+        if ((sim_switches & SIM_SW_HIDE) &&
+            (rptr->flags & REG_HIDDEN))
             continue;
-        if (flag == EX_E) {
-            if ((idx > lows) && (val == last_val))
+        val = last_val = 0;
+        limits = highs;
+        if (highs == 0xFFFFFFFF)
+            limits = (rptr->depth > 1) ? (rptr->depth - 1) : 0;
+        for (idx = lows; idx <= limits; idx++) {
+            if (idx >= rptr->depth)
+                return SCPE_SUB;
+            sim_eval[0] = val = get_rval (rptr, idx);
+            sim_switches = saved_switches;
+            if (schptr && !test_search (sim_eval, schptr))
                 continue;
-            if (idx > val_start+1) {
-                if (idx-1 == val_start+1) {
-                    reason = ex_reg (ofile, val, flag, rptr, idx-1);
-                    sim_switches = saved_switches;
-                    if (reason != SCPE_OK)
-                        return reason;
+            if (flag == EX_E) {
+                if ((idx > lows) && (val == last_val))
+                    continue;
+                if (idx > val_start + 1) {
+                    if (idx - 1 == val_start + 1) {
+                        reason = ex_reg (ofile, val, flag, rptr, idx - 1);
+                        sim_switches = saved_switches;
+                        if (reason != SCPE_OK)
+                            return reason;
                     }
-                else {
-                    if (val_start+1 != idx-1)
-                        fprintf (ofile, "%s[%d]-%s[%d]: same as above\n", rptr->name, val_start+1, rptr->name, idx-1);
-                    else
-                        fprintf (ofile, "%s[%d]: same as above\n", rptr->name, val_start+1);
+                    else {
+                        if (val_start + 1 != idx - 1)
+                            fprintf (ofile, "%s[%d]-%s[%d]: same as above\n", rptr->name, val_start + 1, rptr->name, idx - 1);
+                        else
+                            fprintf (ofile, "%s[%d]: same as above\n", rptr->name, val_start + 1);
                     }
                 }
-            sim_last_val = last_val = val;
-            val_start = idx;
-            reason = ex_reg (ofile, val, flag, rptr, idx);
-            sim_switches = saved_switches;
-            if (reason != SCPE_OK)
-                return reason;
+                sim_last_val = last_val = val;
+                val_start = idx;
+                reason = ex_reg (ofile, val, flag, rptr, idx);
+                sim_switches = saved_switches;
+                if (reason != SCPE_OK)
+                    return reason;
             }
-        if (flag != EX_E) {
-            reason = dep_reg (flag, cptr, rptr, idx);
-            sim_switches = saved_switches;
-            if (reason != SCPE_OK)
-                return reason;
+            if (flag != EX_E) {
+                reason = dep_reg (flag, cptr, rptr, idx);
+                sim_switches = saved_switches;
+                if (reason != SCPE_OK)
+                    return reason;
             }
         }
-    if ((flag == EX_E) && (val_start != highs)) {
-        if (highs == val_start+1) {
-            reason = ex_reg (ofile, val, flag, rptr, highs);
-            sim_switches = saved_switches;
-            if (reason != SCPE_OK)
-                return reason;
+        if ((flag == EX_E) && (val_start != limits)) {
+            if (highs == val_start + 1) {
+                reason = ex_reg (ofile, val, flag, rptr, limits);
+                sim_switches = saved_switches;
+                if (reason != SCPE_OK)
+                    return reason;
             }
-        else {
-            if (val_start+1 != highs)
-                fprintf (ofile, "%s[%d]-%s[%d]: same as above\n", rptr->name, val_start+1, rptr->name, highs);
-            else
-                fprintf (ofile, "%s[%d]: same as above\n", rptr->name, val_start+1);
+            else {
+                if (val_start + 1 != limits)
+                    fprintf (ofile, "%s[%d]-%s[%d]: same as above\n", rptr->name, val_start + 1, rptr->name, limits);
+                else
+                    fprintf (ofile, "%s[%d]: same as above\n", rptr->name, val_start + 1);
             }
         }
     }
-return SCPE_OK;
+    return SCPE_OK;
 }
 
 t_stat exdep_addr_loop (FILE *ofile, SCHTAB *schptr, int32 flag, const char *cptr,

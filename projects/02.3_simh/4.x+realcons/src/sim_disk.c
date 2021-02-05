@@ -385,48 +385,47 @@ return SCPE_OK;
 
 t_bool sim_disk_isavailable (UNIT* uptr)
 {
-    struct disk_context* ctx;
-    t_bool is_available;
+	struct disk_context* ctx;
+	t_bool is_available;
 
-    if (!(uptr->flags & UNIT_ATT))                          /* attached? */
-        return FALSE;
-    switch (DK_GET_FMT (uptr)) {                            /* case on format */
-        case DKUF_F_STD:                                    /* SIMH format */
-            is_available = TRUE;
-            break;
-        case DKUF_F_VHD:                                    /* VHD format */
-            is_available = TRUE;
-            break;
-        case DKUF_F_RAW:                                    /* Raw Physical Disk Access */
-            ctx = (struct disk_context*) uptr->disk_ctx;
+	if (!(uptr->flags & UNIT_ATT))                          /* attached? */
+		return FALSE;
+	ctx = (struct disk_context*) uptr->disk_ctx;
+	switch (DK_GET_FMT (uptr)) {                            /* case on format */
+		case DKUF_F_STD:                                    /* SIMH format */
+			is_available = TRUE;
+			break;
+		case DKUF_F_VHD:                                    /* VHD format */
+			is_available = TRUE;
+			break;
+		case DKUF_F_RAW:                                    /* Raw Physical Disk Access */
+			if (sim_os_disk_isavailable_raw (uptr->fileref)) {
+				if (ctx->media_removed) {
+					int32 saved_switches = sim_switches;
+					int32 saved_quiet = sim_quiet;
+					char* path = (char*) malloc (1 + strlen (uptr->filename));
 
-            if (sim_os_disk_isavailable_raw (uptr->fileref)) {
-                if (ctx->media_removed) {
-                    int32 saved_switches = sim_switches;
-                    int32 saved_quiet = sim_quiet;
-                    char* path = (char*) malloc (1 + strlen (uptr->filename));
-
-                    sim_switches = 0;
-                    sim_quiet = 1;
-                    strcpy (path, uptr->filename);
-                    sim_disk_attach (uptr, path, ctx->sector_size, ctx->xfer_element_size,
-                        FALSE, ctx->dbit, NULL, 0, 0);
-                    sim_quiet = saved_quiet;
-                    sim_switches = saved_switches;
-                    free (path);
-                    ctx->media_removed = 0;
-                }
-            }
-            else
-                ctx->media_removed = 1;
-            is_available = !ctx->media_removed;
-            break;
-        default:
-            is_available = FALSE;
-            break;
-    }
-    sim_debug_unit (ctx->dbit, uptr, "sim_disk_isavailable(unit=%d)=%s\n", (int) (uptr - ctx->dptr->units), is_available ? "true" : "false");
-    return is_available;
+					sim_switches = 0;
+					sim_quiet = 1;
+					strcpy (path, uptr->filename);
+					sim_disk_attach (uptr, path, ctx->sector_size, ctx->xfer_element_size,
+						FALSE, ctx->dbit, NULL, 0, 0);
+					sim_quiet = saved_quiet;
+					sim_switches = saved_switches;
+					free (path);
+					ctx->media_removed = 0;
+				}
+			}
+			else
+				ctx->media_removed = 1;
+			is_available = !ctx->media_removed;
+			break;
+		default:
+			is_available = FALSE;
+			break;
+	}
+	sim_debug_unit (ctx->dbit, uptr, "sim_disk_isavailable(unit=%d)=%s\n", (int) (uptr - ctx->dptr->units), is_available ? "true" : "false");
+	return is_available;
 }
 
 t_bool sim_disk_isavailable_a (UNIT *uptr, DISK_PCALLBACK callback)
