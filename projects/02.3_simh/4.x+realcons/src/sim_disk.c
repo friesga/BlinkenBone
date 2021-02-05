@@ -1563,12 +1563,9 @@ t_stat sim_disk_attach (UNIT* uptr, const char* cptr, size_t sector_size, size_t
 	}
 	uptr->filename = (char*) calloc (CBUFSIZE, sizeof (char));/* alloc name buf */
 	uptr->disk_ctx = ctx = (struct disk_context*) calloc (1, sizeof (struct disk_context));
-    if ((uptr->filename == NULL) || (uptr->disk_ctx == NULL)) {
-        free (uptr->filename);
-        free (uptr->disk_ctx);
+    if ((uptr->filename == NULL) || (uptr->disk_ctx == NULL))
         return _err_return (uptr, SCPE_MEM);
-    }
-	strncpy (uptr->filename, cptr, CBUFSIZE);               /* save name */
+   	strncpy (uptr->filename, cptr, CBUFSIZE);               /* save name */
 	ctx->sector_size = (uint32) sector_size;                 /* save sector_size */
 	ctx->capac_factor = ((dptr->dwidth / dptr->aincr) == 16) ? 2 : 1; /* save capacity units (word: 2, byte: 1) */
 	ctx->xfer_element_size = (uint32) xfer_element_size;     /* save xfer_element_size */
@@ -2336,7 +2333,7 @@ static FILE* sim_os_disk_open_raw (const char* rawdevicename, const char* openmo
     free (tmpname);
     if (Handle != INVALID_HANDLE_VALUE) {
         if ((sim_os_disk_info_raw ((FILE*) Handle, NULL, NULL, &is_cdrom)) ||
-            (DesiredAccess & GENERIC_WRITE) && is_cdrom) {
+            ((DesiredAccess & GENERIC_WRITE) && is_cdrom)) {
             CloseHandle (Handle);
             errno = EACCES;
             return NULL;

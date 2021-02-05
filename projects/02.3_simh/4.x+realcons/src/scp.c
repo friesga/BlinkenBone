@@ -254,6 +254,10 @@
 #define MAX(a,b)  (((a) >= (b)) ? (a) : (b))
 #endif
 
+#ifndef MIN
+#define MIN(a,b)  (((a) <= (b)) ? (a) : (b))
+#endif
+
 /* search logical and boolean ops */
 
 #define SCH_OR          0                               /* search logicals */
@@ -3350,7 +3354,7 @@ strlcpy (abuf, fcptr, sizeof(abuf));
 c = abuf;
 do_arg[10] = NULL;                                      /* make sure the argument list always ends with a NULL */
 for (nargs = 0; nargs < 10; ) {                         /* extract arguments */
-    while (sim_isspace (*c))                                /* skip blanks */
+    while (sim_isspace (*c))                            /* skip blanks */
         c++;
     if (*c == 0)                                        /* all done? */
         do_arg [nargs++] = NULL;                        /* null argument */
@@ -5346,14 +5350,26 @@ if (flag) {
 #elif defined(__ia64__) || defined(_M_IA64) || defined(__itanium__)
     arch = " arch: IA-64";
 #endif
+
 #if defined (__DATE__) && defined (__TIME__)
+
 #ifdef  __cplusplus
     cpp = "C++";
 #else
     cpp = "C";
 #endif
+
+#if !defined (SIM_BUILD_OS)
     fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s", cpp, arch, build, __DATE__, __TIME__);
+#else
+#define S_xstr(a) S_str(a)
+#define S_str(a) #a
+    fprintf (st, "\n        Simulator Compiled as %s%s%s on %s at %s %s", cpp, arch, build, __DATE__, __TIME__, S_xstr (SIM_BUILD_OS));
+#undef S_str
+#undef S_xstr
 #endif
+#endif
+
     fprintf (st, "\n        Memory Access: %s Endian", sim_end ? "Little" : "Big");
     fprintf (st, "\n        Memory Pointer Size: %d bits", (int)sizeof(dptr)*8);
     fprintf (st, "\n        %s", sim_toffset_64 ? "Large File (>2GB) support" : "No Large File support");
@@ -5817,48 +5833,46 @@ typedef void (*DIR_ENTRY_CALLBACK)(const char *directory,
 
 #if defined (_WIN32)
 
-static t_stat sim_dir_scan (const char *cptr, DIR_ENTRY_CALLBACK entry, void *context)
+t_stat sim_dir_scan (const char* cptr, DIR_ENTRY_CALLBACK entry, void* context)
 {
-HANDLE hFind;
-WIN32_FIND_DATAA File;
-struct stat filestat;
-char WildName[PATH_MAX + 1];
+    HANDLE hFind;
+    WIN32_FIND_DATAA File;
+    struct stat filestat;
+    char WildName[PATH_MAX + 1];
 
-if ((!stat (cptr, &filestat)) && (filestat.st_mode & S_IFDIR)) {
-    sprintf (WildName, "%s%c*", cptr, strchr (cptr, '/') ? '/' : '\\');
+    strlcpy (WildName, cptr, sizeof (WildName));
     cptr = WildName;
-    }
-if ((hFind =  FindFirstFileA (cptr, &File)) != INVALID_HANDLE_VALUE) {
-    t_int64 FileSize;
-    char DirName[PATH_MAX + 1], FileName[PATH_MAX + 1];
-    const char *c;
-    char pathsep = '/';
+    sim_trim_endspc (WildName);
+    if ((hFind = FindFirstFileA (cptr, &File)) != INVALID_HANDLE_VALUE) {
+        t_int64 FileSize;
+        char DirName[PATH_MAX + 1], FileName[PATH_MAX + 1];
+        char* c;
+        const char* backslash = strchr (cptr, '\\');
+        const char* slash = strchr (cptr, '/');
+        const char* pathsep = (backslash && slash) ? MIN (backslash, slash) : (backslash ? backslash : slash);
 
-    GetFullPathNameA(cptr, sizeof(DirName), DirName, (char **)&c);
-    c = strrchr(DirName, pathsep);
-    if (NULL == c) {
-        pathsep = '\\';
-        c = strrchr(cptr, pathsep);
+        GetFullPathNameA (cptr, sizeof (DirName), DirName, (char**) &c);
+        c = strrchr (DirName, '\\');
+        *c = '\0';                                  /* Truncate to just directory path */
+        if (!pathsep || (!strcmp (slash, "/*")))    /* Separator wasn't mentioned? */
+            pathsep = "\\";                         /* Default to Windows backslash */
+        if (*pathsep == '/') {                      /* If slash separator? */
+            while ((c = strchr (DirName, '\\')))
+                *c = '/';                           /* Convert backslash to slash */
         }
-    if (c) {
-        memcpy(DirName, cptr, c - cptr);
-        DirName[c - cptr] = '\0';
+        sprintf (&DirName[strlen (DirName)], "%c", *pathsep);
+        do {
+            FileSize = (((t_int64) (File.nFileSizeHigh)) << 32) | File.nFileSizeLow;
+            sprintf (FileName, "%s%s", DirName, File.cFileName);
+            stat (FileName, &filestat);
+            entry (DirName, File.cFileName, FileSize, &filestat, context);
         }
-    else {
-        getcwd(DirName, PATH_MAX);
-        }
-    sprintf (&DirName[strlen (DirName)], "%c", pathsep);
-    do {
-        FileSize = (((t_int64)(File.nFileSizeHigh)) << 32) | File.nFileSizeLow;
-        sprintf (FileName, "%s%s", DirName, File.cFileName);
-        stat (FileName, &filestat);
-        entry (DirName, File.cFileName, FileSize, &filestat, context);
-        } while (FindNextFile (hFind, &File));
-    FindClose (hFind);
+        while (FindNextFile (hFind, &File));
+        FindClose (hFind);
     }
-else
-    return SCPE_ARG;
-return SCPE_OK;
+    else
+        return SCPE_ARG;
+    return SCPE_OK;
 }
 
 #else /* !defined (_WIN32) */
@@ -5888,8 +5902,6 @@ memset (WholeName, 0, sizeof(WholeName));
 strlcpy (WildName, cptr, sizeof(WildName));
 cptr = WildName;
 sim_trim_endspc (WildName);
-if ((!stat (WildName, &filestat)) && (filestat.st_mode & S_IFDIR))
-    strlcat (WildName, "/*", sizeof (WildName));
 if ((*cptr != '/') || (0 == memcmp (cptr, "./", 2)) || (0 == memcmp (cptr, "../", 3))) {
 #if defined (VMS)
     getcwd (WholeName, sizeof (WholeName)-1, 0);
@@ -5954,10 +5966,11 @@ if (dir) {
         if (fnmatch(MatchName, ent->d_name, 0))
             continue;
 #else
+        /* only match exact name without fnmatch support */
         if (strcmp(MatchName, ent->d_name) != 0)
             continue;
 #endif
-        sprintf (FileName, "%s/%s", DirName, ent->d_name);
+        sprintf (FileName, "%s%s", DirName, ent->d_name);
 #endif
         p_name = FileName + strlen (DirName);
         memset (&filestat, 0, sizeof (filestat));
@@ -6042,21 +6055,31 @@ else {
 sim_printf (" %s\n", filename);
 }
 
-t_stat dir_cmd (int32 flg, CONST char *cptr)
+t_stat dir_cmd (int32 flg, CONST char* cptr)
 {
-DIR_CTX dir_state;
-t_stat stat;
+    DIR_CTX dir_state;
+    t_stat r;
+    char WildName[PATH_MAX + 1];
 
-memset (&dir_state, 0, sizeof (dir_state));
-if (*cptr == '\0')
-    cptr = "./*";
-stat = sim_dir_scan (cptr, sim_dir_entry, &dir_state);
-sim_dir_entry (NULL, NULL, 0, NULL, &dir_state);    /* output summary */
-if (stat != SCPE_OK)
-    return sim_messagef (SCPE_ARG, "File Not Found\n");
-return stat;
+
+    memset (&dir_state, 0, sizeof (dir_state));
+    strlcpy (WildName, cptr, sizeof (WildName));
+    cptr = WildName;
+    sim_trim_endspc (WildName);
+    if (*cptr == '\0')
+        cptr = "./*";
+    else {
+        struct stat filestat;
+
+        if ((!stat (WildName, &filestat)) && (filestat.st_mode & S_IFDIR))
+            strlcat (WildName, "/*", sizeof (WildName));
+    }
+    r = sim_dir_scan (cptr, sim_dir_entry, &dir_state);
+    sim_dir_entry (NULL, NULL, 0, NULL, &dir_state);    /* output summary */
+    if (r != SCPE_OK)
+        return sim_messagef (SCPE_ARG, "File Not Found\n");
+    return r;
 }
-
 
 typedef struct {
     t_stat stat;
@@ -8671,6 +8694,7 @@ if (0 == memcmp (cptr, "\xEF\xBB\xBF", 3))              /* Skip/ignore UTF8_BOM 
     memmove (cptr, cptr + 3, strlen (cptr + 3));
 while (sim_isspace (*cptr))                             /* trim leading spc */
     cptr++;
+sim_trim_endspc (cptr);                                 /* trim trailing spc */
 if ((*cptr == ';') || (*cptr == '#')) {                 /* ignore comment */
     if (sim_do_echo)                                    /* echo comments if -v */
         sim_printf("%s> %s\n", do_position(), cptr);

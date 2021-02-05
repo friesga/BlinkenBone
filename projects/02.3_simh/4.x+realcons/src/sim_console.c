@@ -2155,8 +2155,8 @@ t_stat sim_show_cons_speed (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, CONS
 {
 if (sim_con_ldsc.rxbps) {
     fprintf (st, "Speed = %d", sim_con_ldsc.rxbps);
-    if (sim_con_ldsc.rxbpsfactor != TMXR_RX_BPS_UNIT_SCALE)
-        fprintf (st, "*%.0f", sim_con_ldsc.rxbpsfactor/TMXR_RX_BPS_UNIT_SCALE);
+    if (sim_con_ldsc.bpsfactor != TMXR_BPS_UNIT_SCALE)
+        fprintf (st, "*%.0f", sim_con_ldsc.bpsfactor / TMXR_BPS_UNIT_SCALE);
     fprintf (st, " bps\n");
     }
 return SCPE_OK;
@@ -2801,7 +2801,7 @@ if (!sim_rem_master_mode) {
         (sim_con_ldsc.serport == 0)) {                      /* and not serial? */
         if (c && sim_con_ldsc.rxbps)                        /* got something && rate limiting? */
             sim_con_ldsc.rxnexttime =                       /* compute next input time */
-                floor (sim_gtime () + ((sim_con_ldsc.rxdelta * sim_timer_inst_per_sec ())/sim_con_ldsc.rxbpsfactor));
+            floor (sim_gtime () + ((sim_con_ldsc.rxdelta * sim_timer_inst_per_sec ()) / sim_con_ldsc.bpsfactor));
         if (c)
             sim_debug (DBG_RCV, &sim_con_telnet, "sim_poll_kbd() returning: '%c' (0x%02X)\n", sim_isprint (c & 0xFF) ? c & 0xFF : '.', c);
         return c;                                           /* in-window */
@@ -3930,6 +3930,12 @@ return SCPE_OK;
 
 #else
 
+#if !defined (__ANDROID_API__) || (__ANDROID_API__ < 26)
+#define TCSETATTR_ACTION TCSAFLUSH
+#else
+#define TCSETATTR_ACTION TCSANOW
+#endif
+
 #include <termios.h>
 #include <unistd.h>
 
@@ -3990,7 +3996,7 @@ runtty.c_cc[VINTR] = 0;                                 /* OS X doesn't deliver 
 #else
 runtty.c_cc[VINTR] = sim_int_char;                      /* in case changed */
 #endif
-if (tcsetattr (fileno (stdin), TCSAFLUSH, &runtty) < 0)
+if (tcsetattr (fileno (stdin), TCSETATTR_ACTION, &runtty) < 0)
     return SCPE_TTIERR;
 sim_os_set_thread_priority (PRIORITY_BELOW_NORMAL);     /* try to lower pri */
 return SCPE_OK;
@@ -4001,7 +4007,7 @@ static t_stat sim_os_ttcmd (void)
 if (!isatty (fileno (stdin)))                           /* skip if !tty */
     return SCPE_OK;
 sim_os_set_thread_priority (PRIORITY_NORMAL);           /* try to raise pri */
-if (tcsetattr (fileno (stdin), TCSAFLUSH, &cmdtty) < 0)
+if (tcsetattr (fileno (stdin), TCSETATTR_ACTION, &cmdtty) < 0)
     return SCPE_TTIERR;
 return SCPE_OK;
 }

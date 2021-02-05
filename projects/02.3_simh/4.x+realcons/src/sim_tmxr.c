@@ -735,7 +735,7 @@ static int32 tmxr_write (TMLN* lp, int32 length)
 		}
 	}
 	if ((written > 0) && (lp->txbps) && (sim_is_running))
-		lp->txnexttime = floor (sim_gtime () + ((written * lp->txdelta * sim_timer_inst_per_sec ()) / TMXR_RX_BPS_UNIT_SCALE));
+        lp->txnexttime = floor (sim_gtime () + ((written * lp->txdelta * sim_timer_inst_per_sec ()) / lp->bpsfactor));
 	return written;
 }
 
@@ -1757,39 +1757,39 @@ int32 tmxr_input_pending_ln (TMLN *lp)
 return (lp->rxbpi - lp->rxbpr);
 }
 
-int32 tmxr_getc_ln (TMLN *lp)
+int32 tmxr_getc_ln (TMLN* lp)
 {
-int32 j; 
-t_stat val = 0;
-uint32 tmp;
+	int32 j;
+	t_stat val = 0;
+	uint32 tmp;
 
-tmxr_debug_trace_line (lp, "tmxr_getc_ln()");
-if ((lp->conn && lp->rcve) &&                           /* conn & enb & */
-    ((!lp->rxbps) ||                                    /* (!rate limited || enough time passed)? */
-     (sim_gtime () >= lp->rxnexttime))) {
-    if (!sim_send_poll_data (&lp->send, &val)) {        /* injected input characters available? */
-        j = lp->rxbpi - lp->rxbpr;                      /* # input chrs */
-        if (j) {                                        /* any? */
-            tmp = lp->rxb[lp->rxbpr];                   /* get char */
-            val = TMXR_VALID | (tmp & 0377);            /* valid + chr */
-            if (lp->rbr[lp->rxbpr]) {                   /* break? */
-                lp->rbr[lp->rxbpr] = 0;                 /* clear status */
-                val = val | SCPE_BREAK;                 /* indicate to caller */
-                }
-            lp->rxbpr = lp->rxbpr + 1;                  /* adv pointer */
-            }
-        }
-    }                                                   /* end if conn */
-if (lp->rxbpi == lp->rxbpr)                             /* empty? zero ptrs */
-    lp->rxbpi = lp->rxbpr = 0;
-if (val) {                                              /* Got something? */
-    if (lp->rxbps)
-        lp->rxnexttime = floor (sim_gtime () + ((lp->rxdelta * sim_timer_inst_per_sec ()) / lp->rxbpsfactor));
-    else
-        lp->rxnexttime = floor (sim_gtime () + ((lp->mp->uptr->wait * sim_timer_inst_per_sec ()) / TMXR_RX_BPS_UNIT_SCALE));
-    }
-tmxr_debug_return(lp, val);
-return val;
+	tmxr_debug_trace_line (lp, "tmxr_getc_ln()");
+	if ((lp->conn && lp->rcve) &&                           /* conn & enb & */
+		((!lp->rxbps) ||                                    /* (!rate limited || enough time passed)? */
+		(sim_gtime () >= lp->rxnexttime))) {
+		if (!sim_send_poll_data (&lp->send, &val)) {        /* injected input characters available? */
+			j = lp->rxbpi - lp->rxbpr;                      /* # input chrs */
+			if (j) {                                        /* any? */
+				tmp = lp->rxb[lp->rxbpr];                   /* get char */
+				val = TMXR_VALID | (tmp & 0377);            /* valid + chr */
+				if (lp->rbr[lp->rxbpr]) {                   /* break? */
+					lp->rbr[lp->rxbpr] = 0;                 /* clear status */
+					val = val | SCPE_BREAK;                 /* indicate to caller */
+				}
+				lp->rxbpr = lp->rxbpr + 1;                  /* adv pointer */
+			}
+		}
+	}                                                   /* end if conn */
+	if (lp->rxbpi == lp->rxbpr)                             /* empty? zero ptrs */
+		lp->rxbpi = lp->rxbpr = 0;
+	if (val) {                                              /* Got something? */
+		if (lp->rxbps)
+			lp->rxnexttime = floor (sim_gtime () + ((lp->rxdelta * sim_timer_inst_per_sec ()) / lp->bpsfactor));
+		else
+			lp->rxnexttime = floor (sim_gtime () + ((lp->mp->uptr->wait * sim_timer_inst_per_sec ()) / TMXR_BPS_UNIT_SCALE));
+	}
+	tmxr_debug_return (lp, val);
+	return val;
 }
 
 /* Get packet from specific line
@@ -2243,31 +2243,33 @@ return (lp->conn || lp->loopback) ? SCPE_OK : SCPE_LOST;
         none
 */
 
-void tmxr_poll_tx (TMXR *mp)
+void tmxr_poll_tx (TMXR* mp)
 {
-int32 i, nbytes;
-TMLN *lp;
+	int32 i, nbytes;
+	TMLN* lp;
 
-tmxr_debug_trace (mp, "tmxr_poll_tx()");
-for (i = 0; i < mp->lines; i++) {                       /* loop thru lines */
-    lp = mp->ldsc + i;                                  /* get line desc */
-    if (!lp->conn)                                      /* skip if !conn */
-        continue;
-    nbytes = tmxr_send_buffered_data (lp);              /* buffered bytes */
-    if (nbytes == 0) {                                  /* buf empty? enab line */
+	tmxr_debug_trace (mp, "tmxr_poll_tx()");
+	for (i = 0; i < mp->lines; i++) {                       /* loop thru lines */
+		lp = mp->ldsc + i;                                  /* get line desc */
+		if (!lp->conn)                                      /* skip if !conn */
+			continue;
+		nbytes = tmxr_send_buffered_data (lp);              /* buffered bytes */
+		if (nbytes == 0) {                                  /* buf empty? enab line */
 #if defined(SIM_ASYNCH_MUX)
-        UNIT *ruptr = lp->uptr ? lp->uptr : lp->mp->uptr;
-        if ((ruptr->dynflags & UNIT_TM_POLL) &&
-            sim_asynch_enabled &&
-            tmxr_rqln (lp))
-            _sim_activate (ruptr, 0);
+			UNIT* ruptr = lp->uptr ? lp->uptr : lp->mp->uptr;
+			if ((ruptr->dynflags & UNIT_TM_POLL) &&
+				sim_asynch_enabled &&
+				tmxr_rqln (lp))
+				_sim_activate (ruptr, 0);
 #endif
-        if ((lp->xmte == 0) && 
-            ((lp->txbps == 0) ||
-             (lp->txnexttime >= sim_gtime ())))
-            lp->xmte = 1;                               /* enable line transmit */
-        }
-    }                                                   /* end for */
+			if ((lp->xmte == 0) &&
+				((lp->txbps == 0) ||
+				(lp->txnexttime <= sim_gtime ()))) {
+				lp->xmte = 1;                               /* enable line transmit */
+				lp->txnexttime = 0.0;
+			}
+		}
+	}                                                   /* end for */
 }
 
 
@@ -2406,86 +2408,94 @@ if (uptr && uptr->filename) {
 return SCPE_OK;
 }
 
-static int32 _tmln_speed_delta (CONST char *cptr)
+static int32 _tmln_speed_delta (CONST char* cptr)
 {
-struct {
-    const char *bps;
-    int32 delta;
-    } *spd, speeds[] = {
-    {"50",      TMLN_SPD_50_BPS},
-    {"75",      TMLN_SPD_75_BPS},
-    {"110",     TMLN_SPD_110_BPS},
-    {"134",     TMLN_SPD_134_BPS},
-    {"150",     TMLN_SPD_150_BPS},
-    {"300",     TMLN_SPD_300_BPS},
-    {"600",     TMLN_SPD_600_BPS},
-    {"1200",    TMLN_SPD_1200_BPS},
-    {"1800",    TMLN_SPD_1800_BPS},
-    {"2000",    TMLN_SPD_2000_BPS},
-    {"2400",    TMLN_SPD_2400_BPS},
-    {"3600",    TMLN_SPD_3600_BPS},
-    {"4800",    TMLN_SPD_4800_BPS},
-    {"7200",    TMLN_SPD_7200_BPS},
-    {"9600",    TMLN_SPD_9600_BPS},
-    {"19200",   TMLN_SPD_19200_BPS},
-    {"38400",   TMLN_SPD_38400_BPS},
-    {"57600",   TMLN_SPD_57600_BPS},
-    {"76800",   TMLN_SPD_76800_BPS},
-    {"115200",  TMLN_SPD_115200_BPS},
-    {"0",       0}};                    /* End of List, last valid value */
-int nspeed;
-char speed[24];
+	static struct
+	{
+		const char* bps;
+		int32 delta;
+	} *spd, speeds[] = {
+	{"50",      TMLN_SPD_50_BPS},
+	{"75",      TMLN_SPD_75_BPS},
+	{"110",     TMLN_SPD_110_BPS},
+	{"134",     TMLN_SPD_134_BPS},
+	{"150",     TMLN_SPD_150_BPS},
+	{"300",     TMLN_SPD_300_BPS},
+	{"600",     TMLN_SPD_600_BPS},
+	{"1200",    TMLN_SPD_1200_BPS},
+	{"1800",    TMLN_SPD_1800_BPS},
+	{"2000",    TMLN_SPD_2000_BPS},
+	{"2400",    TMLN_SPD_2400_BPS},
+	{"3600",    TMLN_SPD_3600_BPS},
+	{"4800",    TMLN_SPD_4800_BPS},
+	{"7200",    TMLN_SPD_7200_BPS},
+	{"9600",    TMLN_SPD_9600_BPS},
+	{"19200",   TMLN_SPD_19200_BPS},
+	{"38400",   TMLN_SPD_38400_BPS},
+	{"57600",   TMLN_SPD_57600_BPS},
+	{"76800",   TMLN_SPD_76800_BPS},
+	{"115200",  TMLN_SPD_115200_BPS},
+	{"0",       0}};                    /* End of List, last valid value */
+	int nspeed;
+	char speed[24];
+	int nfactor = 1;
 
-nspeed = (uint32)strtotv (cptr, &cptr, 10);
-if ((*cptr != '\0') && (*cptr != '-') && (*cptr != '*'))
-    return -1;
-sprintf (speed, "%d", nspeed);
+	nspeed = (uint32) strtotv (cptr, &cptr, 10);
+	if ((*cptr != '\0') && (*cptr != '-') && (*cptr != '*'))
+		return -1;
+	if (*cptr == '*') {
+		nfactor = (uint32) strtotv (cptr + 1, NULL, 10);
+		if ((nfactor < 1) || (nfactor > 32))
+			return -1;
+	}
+	sprintf (speed, "%d", nspeed);
 
-spd = speeds;
-while (1) {
-    if (0 == strcmp(spd->bps, speed))
-        return spd->delta;
-    if (spd->delta == 0)
-        break;
-    ++spd;
-    }
-return -1;
+	spd = speeds;
+	while (1) {
+		if (0 == strcmp (spd->bps, speed))
+			return spd->delta;
+		if (spd->delta == 0)
+			break;
+		++spd;
+	}
+	return -1;
 }
 
 t_stat tmxr_set_line_speed (TMLN* lp, CONST char* speed)
 {
-	UNIT* uptr;
-	CONST char* cptr;
-	t_stat r;
+    UNIT* uptr;
+    CONST char* cptr;
+    t_stat r;
 
-	if (!speed || !*speed)
-		return SCPE_2FARG;
-	if (_tmln_speed_delta (speed) < 0)
-		return SCPE_ARG;
-	lp->rxbps = (uint32) strtotv (speed, &cptr, 10);
-	if (*cptr == '*') {
-		uint32 rxbpsfactor = (uint32) get_uint (cptr + 1, 10, 32, &r);
-		if (r != SCPE_OK)
-			return r;
-		lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE * rxbpsfactor;
-	}
-	if ((lp->serport) && (lp->rxbpsfactor != 0.0))
-		lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE;
-	lp->rxdelta = _tmln_speed_delta (speed);
-	lp->rxnexttime = 0.0;
-	uptr = lp->uptr;
-	if ((!uptr) && (lp->mp))
-		uptr = lp->mp->uptr;
-	if (uptr)
-		uptr->wait = lp->rxdelta;
-	if (lp->rxbpsfactor == 0.0)
-		lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE;
-	lp->txbps = lp->rxbps;
-	lp->txdelta = lp->rxdelta;
-	lp->txnexttime = lp->rxnexttime;
-	if (lp->o_uptr)
-		lp->o_uptr->wait = lp->txdelta;
-	return SCPE_OK;
+    if (!speed || !*speed)
+        return SCPE_2FARG;
+    if (_tmln_speed_delta (speed) < 0)
+        return SCPE_ARG;
+    lp->rxbps = (uint32) strtotv (speed, &cptr, 10);
+    if (*cptr == '*') {
+        uint32 bpsfactor = (uint32) get_uint (cptr + 1, 10, 32, &r);
+
+        if (r != SCPE_OK)
+            return r;
+        lp->bpsfactor = TMXR_BPS_UNIT_SCALE * bpsfactor;
+    }
+    if ((lp->serport) && (lp->bpsfactor != 0.0))
+        lp->bpsfactor = TMXR_BPS_UNIT_SCALE;
+    lp->rxdelta = _tmln_speed_delta (speed);
+    lp->rxnexttime = 0.0;
+    uptr = lp->uptr;
+    if ((!uptr) && (lp->mp))
+        uptr = lp->mp->uptr;
+    if (uptr)
+        uptr->wait = lp->rxdelta;
+    if (lp->bpsfactor == 0.0)
+        lp->bpsfactor = TMXR_BPS_UNIT_SCALE;
+    lp->txbps = lp->rxbps;
+    lp->txdelta = lp->rxdelta;
+    lp->txnexttime = lp->rxnexttime;
+    if (lp->o_uptr)
+        lp->o_uptr->wait = lp->txdelta;
+    return SCPE_OK;
 }
 
 
@@ -2521,8 +2531,8 @@ t_stat tmxr_open_master (TMXR* mp, CONST char* cptr)
         lp = mp->ldsc + i;
         lp->mp = mp;                                /* set the back pointer */
         lp->modem_control = mp->modem_control;
-        if (lp->rxbpsfactor == 0.0)
-            lp->rxbpsfactor = TMXR_RX_BPS_UNIT_SCALE;
+        if (lp->bpsfactor == 0.0)
+            lp->bpsfactor = TMXR_BPS_UNIT_SCALE;
     }
     mp->ring_sock = INVALID_SOCKET;
     free (mp->ring_ipad);
@@ -3854,89 +3864,107 @@ if (tmxr_open_device_count)
 return SCPE_OK;
 }
 
-t_stat tmxr_show_open_devices (FILE* st, DEVICE *dptr, UNIT* uptr, int32 val, CONST char* desc)
+t_stat tmxr_show_open_devices (FILE* st, DEVICE* dptr, UNIT* uptr, int32 val, CONST char* desc)
 {
-int i, j;
+    int i, j;
 
-if (0 == tmxr_open_device_count)
-    fprintf(st, "No Attached Multiplexer Devices\n");
-else {
-    for (i=0; i<tmxr_open_device_count; ++i) {
-        TMXR *mp = tmxr_open_devices[i];
-        TMLN *lp;
-        UNIT* o_uptr = mp->ldsc[0].o_uptr;
-        char *attach;
+    if (0 == tmxr_open_device_count)
+        fprintf (st, "No Attached Multiplexer Devices\n");
+    else {
+        for (i = 0; i < tmxr_open_device_count; ++i) {
+            TMXR* mp = tmxr_open_devices[i];
+            TMLN* lp;
+            UNIT* o_uptr = mp->ldsc[0].o_uptr;
+            UNIT* uptr = mp->ldsc[0].uptr;
+            char* attach;
 
-        fprintf(st, "Multiplexer device: %s", (mp->dptr ? sim_dname (mp->dptr) : ""));
-        if (mp->lines > 1) {
-            fprintf(st, ", ");
-            tmxr_show_lines(st, NULL, 0, mp);
-            }
-        if (mp->packet)
-            fprintf(st, ", Packet");
-        if (mp->datagram)
-            fprintf(st, ", UDP");
-        if (mp->notelnet)
-            fprintf(st, ", Telnet=disabled");
-        if (mp->modem_control)
-            fprintf(st, ", ModemControl=enabled");
-        if (mp->buffered)
-            fprintf(st, ", Buffered=%d", mp->buffered);
-        attach = tmxr_mux_attach_string (NULL, mp);
-        if (attach)
-            fprintf(st, ",\n    attached to %s, ", attach);
-        free (attach);
-        tmxr_show_summ(st, NULL, 0, mp);
-        fprintf(st, ", sessions=%d", mp->sessions);
-        if (mp->lines == 1) {
-            if (mp->ldsc->rxbps) {
-                fprintf(st, ", Speed=%d", mp->ldsc->rxbps);
-                if (mp->ldsc->rxbpsfactor != TMXR_RX_BPS_UNIT_SCALE)
-                    fprintf(st, "*%.0f", mp->ldsc->rxbpsfactor/TMXR_RX_BPS_UNIT_SCALE);
-                fprintf(st, " bps");
-                }
-            }
-        fprintf(st, "\n");
-        if (mp->ring_start_time) {
-            fprintf (st, "    incoming Connection from: %s ringing for %d milliseconds\n", mp->ring_ipad, sim_os_msec () - mp->ring_start_time);
-            }
-        for (j = 0; j < mp->lines; j++) {
-            lp = mp->ldsc + j;
+            fprintf (st, "Multiplexer device: %s", (mp->dptr ? sim_dname (mp->dptr) : ""));
             if (mp->lines > 1) {
-                if (lp->dptr && (mp->dptr != lp->dptr))
-                    fprintf (st, "Device: %s ", sim_dname(lp->dptr));
-                fprintf (st, "Line: %d", j);
-                if (lp->conn == TMXR_LINE_DISABLED)
-                    fprintf (st, " - Disabled");
-                if (mp->notelnet != lp->notelnet)
-                    fprintf (st, " - %stelnet", lp->notelnet ? "no" : "");
-                if (lp->uptr && (lp->uptr != lp->mp->uptr))
-                    fprintf (st, " - Unit: %s", sim_uname (lp->uptr));
-                if (lp->o_uptr && (lp->o_uptr != lp->mp->uptr) && (lp->o_uptr != lp->uptr))
-                    fprintf (st, " - Output Unit: %s", sim_uname (lp->o_uptr));
-                if (mp->modem_control != lp->modem_control)
-                    fprintf(st, ", ModemControl=%s", lp->modem_control ? "enabled" : "disabled");
-                if (lp->loopback)
-                    fprintf(st, ", Loopback");
-                if (lp->rxbps) {
-                    fprintf(st, ", Speed=%d", lp->rxbps);
-                    if (lp->rxbpsfactor != TMXR_RX_BPS_UNIT_SCALE)
-                        fprintf(st, "*%.0f", lp->rxbpsfactor/TMXR_RX_BPS_UNIT_SCALE);
-                    fprintf(st, " bps");
+                fprintf (st, ", ");
+                tmxr_show_lines (st, NULL, 0, mp);
+            }
+            if (mp->packet)
+                fprintf (st, ", Packet");
+            if (mp->datagram)
+                fprintf (st, ", UDP");
+            if (mp->notelnet)
+                fprintf (st, ", Telnet=disabled");
+            if (mp->modem_control)
+                fprintf (st, ", ModemControl=enabled");
+            if (mp->buffered)
+                fprintf (st, ", Buffered=%d", mp->buffered);
+            for (j = 1; j < mp->lines; j++)
+                if (o_uptr != mp->ldsc[j].o_uptr)
+                    break;
+            if (j == mp->lines)
+                fprintf (st, ", Output Unit: %s", sim_uname (o_uptr));
+            for (j = 1; j < mp->lines; j++)
+                if (uptr != mp->ldsc[j].uptr)
+                    break;
+            if (j == mp->lines) {
+                fprintf (st, ",\n    Input Polling Unit: %s", sim_uname (uptr));
+                if (uptr != mp->uptr)
+                    fprintf (st, ", Connection Polling Unit: %s", sim_uname (mp->uptr));
+            }
+            attach = tmxr_mux_attach_string (NULL, mp);
+            if (attach)
+                fprintf (st, ",\n    attached to %s, ", attach);
+            free (attach);
+            tmxr_show_summ (st, NULL, 0, mp);
+            fprintf (st, ", sessions=%d", mp->sessions);
+            if (mp->lines == 1) {
+                if (mp->ldsc->rxbps) {
+                    fprintf (st, ", Speed=%d", mp->ldsc->rxbps);
+                    if (mp->ldsc->bpsfactor != TMXR_BPS_UNIT_SCALE)
+                        fprintf (st, "*%.0f", mp->ldsc->bpsfactor / TMXR_BPS_UNIT_SCALE);
+                    fprintf (st, " bps");
+                }
+            }
+            fprintf (st, "\n");
+            if (mp->ring_start_time) {
+                fprintf (st, "    incoming Connection from: %s ringing for %d milliseconds\n", mp->ring_ipad, sim_os_msec () - mp->ring_start_time);
+            }
+            for (j = 0; j < mp->lines; j++) {
+                lp = mp->ldsc + j;
+                if (mp->lines > 1) {
+                    if (lp->dptr && (mp->dptr != lp->dptr))
+                        fprintf (st, "Device: %s ", sim_dname (lp->dptr));
+                    fprintf (st, "Line: %d", j);
+                    if (lp->conn == TMXR_LINE_DISABLED)
+                        fprintf (st, " - Disabled");
+                    if (mp->notelnet != lp->notelnet)
+                        fprintf (st, " - %stelnet", lp->notelnet ? "no" : "");
+                    if (lp->uptr && (lp->uptr != lp->mp->uptr))
+                        fprintf (st, " - Unit: %s", sim_uname (lp->uptr));
+                    if ((lp->o_uptr != o_uptr) && lp->o_uptr && (lp->o_uptr != lp->mp->uptr) && (lp->o_uptr != lp->uptr))
+                        fprintf (st, " - Output Unit: %s", sim_uname (lp->o_uptr));
+                    if (mp->modem_control != lp->modem_control)
+                        fprintf (st, ", ModemControl=%s", lp->modem_control ? "enabled" : "disabled");
+                    if (lp->loopback)
+                        fprintf (st, ", Loopback");
+                    if (lp->rxbps) {
+                        fprintf (st, ", Speed=%d", lp->rxbps);
+                        if (lp->bpsfactor != TMXR_BPS_UNIT_SCALE)
+                            fprintf (st, "*%.0f", lp->bpsfactor / TMXR_BPS_UNIT_SCALE);
+                        fprintf (st, " bps");
                     }
-                fprintf (st, "\n");
+                    else {
+                        if (lp->bpsfactor != TMXR_BPS_UNIT_SCALE)
+                            fprintf (st, ", Speed=*%.0f bps", lp->bpsfactor / TMXR_BPS_UNIT_SCALE);
+                    }
+                    fprintf (st, "\n");
                 }
-            if ((!lp->sock) && (!lp->connecting) && (!lp->serport) && (!lp->master)) {
-                if (lp->modem_control)
-                    tmxr_fconns (st, lp, -1);
-                continue;
+                if ((!lp->sock) && (!lp->connecting) && (!lp->serport) && (!lp->master)) {
+                    if (lp->modem_control)
+                        tmxr_fconns (st, lp, -1);
+                    continue;
                 }
-            tmxr_fconns (st, lp, -1);
-            tmxr_fstats (st, lp, -1);
+                tmxr_fconns (st, lp, -1);
+                tmxr_fstats (st, lp, -1);
             }
         }
     }
-return SCPE_OK;
+    return SCPE_OK;
 }
 
 
@@ -4612,8 +4640,8 @@ else {
             fprintf (st, "  speed = %u", lp->rxbps);
         else
             fprintf (st, "  speed = %u/%u", lp->rxbps, lp->txbps);
-        if (lp->rxbpsfactor / TMXR_RX_BPS_UNIT_SCALE > 1.0)
-            fprintf (st, "*%.0f", lp->rxbpsfactor / TMXR_RX_BPS_UNIT_SCALE);
+        if (lp->bpsfactor / TMXR_BPS_UNIT_SCALE > 1.0)
+            fprintf (st, "*%.0f", lp->bpsfactor / TMXR_BPS_UNIT_SCALE);
         fprintf (st, " bps\n");
         }
     }
