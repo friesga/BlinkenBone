@@ -405,8 +405,9 @@ typedef uint32          t_addr;
 #define SCPE_EXPECT     (SCPE_BASE + 45)                /* expect matched */
 #define SCPE_AMBREG     (SCPE_BASE + 46)                /* ambiguous register */
 #define SCPE_REMOTE     (SCPE_BASE + 47)                /* remote console command */
+#define SCPE_INVEXPR    (SCPE_BASE + 48)                /* invalid expression */
 
-#define SCPE_MAX_ERR    (SCPE_BASE + 47)                /* Maximum SCPE Error Value */
+#define SCPE_MAX_ERR    (SCPE_BASE + 48)                /* Maximum SCPE Error Value */
 #define SCPE_KFLAG      0x10000000                      /* tti data flag */
 #define SCPE_BREAK      0x20000000                      /* tti break flag */
 #define SCPE_NOMESSAGE  0x40000000                      /* message display supression flag */
@@ -418,6 +419,8 @@ typedef uint32          t_addr;
 #define PV_RSPC         1                               /* right, space fill */
 #define PV_RCOMMA       2                               /* right, space fill. Comma separate every 3 */
 #define PV_LEFT         3                               /* left justify */
+#define PV_RCOMMASIGN   6                               /* right, space fill. Comma separate every 3 treat as signed */
+#define PV_LEFTSIGN     7                               /* left justify treat as signed */
 
 /* Default timing parameters */
 
@@ -841,9 +844,12 @@ struct DEBTAB {
 #define DEBUG_PRI(d,m)  (sim_deb && (d.dctrl & (m)))
 #define DEBUG_PRJ(d,m)  (sim_deb && ((d)->dctrl & (m)))
 
-#define SIM_DBG_EVENT       0x10000
-#define SIM_DBG_ACTIVATE    0x20000
-#define SIM_DBG_AIO_QUEUE   0x40000
+#define SIM_DBG_EVENT       0x010000        /* event dispatch activities */
+#define SIM_DBG_ACTIVATE    0x020000        /* queue insertion activities */
+#define SIM_DBG_AIO_QUEUE   0x040000        /* asynch event queue activities */
+#define SIM_DBG_EXP_STACK   0x080000        /* expression stack activities */
+#define SIM_DBG_EXP_EVAL    0x100000        /* expression evaluation activities */
+
 
 /* Open File Reference */
 struct FILEREF {
