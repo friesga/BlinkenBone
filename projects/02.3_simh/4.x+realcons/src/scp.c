@@ -525,7 +525,6 @@ t_stat do_cmd_label (int32 flag, CONST char *cptr, CONST char *label);
 void int_handler (int signal);
 t_stat set_prompt (int32 flag, CONST char *cptr);
 t_stat sim_set_asynch (int32 flag, CONST char *cptr);
-t_stat sim_set_environment (int32 flag, CONST char *cptr);
 static const char* get_dbg_verb (uint32 dbits, DEVICE* dptr, UNIT* uptr);
 
 /* Global data */
@@ -588,7 +587,7 @@ static int32 sim_show_message = 1;                      /* the message display s
 static int32 sim_on_inherit = 0;                        /* the inherit status of on state and conditions when executing do files */
 static int32 sim_do_depth = 0;
 static t_bool sim_cmd_echoed = FALSE;                   /* Command was emitted already prior to message output */
-
+static char** sim_exp_argv = NULL;
 static int32 sim_on_check[MAX_DO_NEST_LVL+1];
 static char *sim_on_actions[MAX_DO_NEST_LVL+1][SCPE_MAX_ERR+2];
 #define ON_SIGINT_ACTION (SCPE_MAX_ERR+1)
@@ -609,8 +608,34 @@ static DEBTAB sim_dflt_debug[] = {
   {0}
 };
 
-static UNIT sim_step_unit = { UDATA (&step_svc, 0, 0)  };
-static UNIT sim_expect_unit = { UDATA (&expect_svc, 0, 0)  };
+static const char* sim_int_step_description (DEVICE* dptr)
+{
+    return "Step/Next facility";
+}
+
+static UNIT sim_step_unit = {UDATA (&step_svc, 0, 0)};
+DEVICE sim_step_dev = {
+    "INT-STEP", &sim_step_unit, NULL, NULL,
+    1, 0, 0, 0, 0, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, DEV_NOSAVE, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL,
+    sim_int_step_description};
+
+static const char* sim_int_expect_description (DEVICE* dptr)
+{
+    return "Expect facility";
+}
+
+static UNIT sim_expect_unit = {UDATA (&expect_svc, 0, 0)};
+DEVICE sim_expect_dev = {
+    "INT-EXPECT", &sim_expect_unit, NULL, NULL,
+    1, 0, 0, 0, 0, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL,
+    NULL, DEV_NOSAVE, 0,
+    NULL, NULL, NULL, NULL, NULL, NULL,
+    sim_int_expect_description};
+
 #if defined USE_INT64
 static const char *sim_si64 = "64b data";
 #else
@@ -2395,7 +2420,7 @@ int main (int argc, char* argv[])
 
 #endif
 
-	* cbuf = 0;                                              /* init arg buffer */
+	*cbuf = 0;                                              /* init arg buffer */
 	sim_switches = 0;                                       /* init switches */
 	lookswitch = TRUE;
 	stdnul = fopen (NULL_DEVICE, "wb");
@@ -2440,6 +2465,8 @@ int main (int argc, char* argv[])
 	if (sim_emax <= 0)
 		sim_emax = 1;
 	sim_timer_init ();
+    sim_register_internal_device (&sim_expect_dev);
+    sim_register_internal_device (&sim_step_dev);
 
 	if ((stat = sim_ttinit ()) != SCPE_OK) {
 		fprintf (stderr, "Fatal terminal initialization error\n%s\n",
@@ -2562,8 +2589,10 @@ while (stat != SCPE_EXIT) {                             /* in case exit */
         if (sim_on_actions[sim_do_depth][ON_SIGINT_ACTION])
             sim_brk_setact (sim_on_actions[sim_do_depth][ON_SIGINT_ACTION]);
         }
-    if ((cptr = sim_brk_getact (cbuf, sizeof(cbuf))))   /* pending action? */
-        printf ("%s%s\n", sim_prompt, cptr);            /* echo */
+    if ((cptr = sim_brk_getact (cbuf, sizeof (cbuf)))) { /* pending action? */
+        if (sim_do_echo)
+            printf ("%s+ %s\n", sim_prompt, cptr);      /* echo */
+    }
     else {
         if (sim_vm_read != NULL) {                      /* sim routine? */
             printf ("%s", sim_prompt);                  /* prompt */
@@ -3326,233 +3355,240 @@ sprintf (cbuf, "%s%s%s-%d", sim_do_filename[sim_do_depth], sim_do_label[sim_do_d
 return cbuf;
 }
 
-t_stat do_cmd_label (int32 flag, CONST char *fcptr, CONST char *label)
+t_stat do_cmd_label (int32 flag, CONST char* fcptr, CONST char* label)
 {
-char cbuf[4*CBUFSIZE], gbuf[CBUFSIZE], abuf[4*CBUFSIZE], quote, *c, *do_arg[11];
-CONST char *cptr;
-FILE *fpin;
-CTAB *cmdp = NULL;
-int32 echo, nargs, errabort, i;
-int32 saved_sim_do_echo = sim_do_echo,
-      saved_sim_show_message = sim_show_message,
-      saved_sim_on_inherit = sim_on_inherit,
-      saved_sim_quiet = sim_quiet;
-t_bool staying;
-t_stat stat, stat_nomessage;
+    char cbuf[4 * CBUFSIZE], gbuf[CBUFSIZE], abuf[4 * CBUFSIZE], quote, * c, * do_arg[11];
+    CONST char* cptr;
+    FILE* fpin;
+    CTAB* cmdp = NULL;
+    int32 echo, nargs, errabort, i;
+    int32 saved_sim_do_echo = sim_do_echo,
+        saved_sim_show_message = sim_show_message,
+        saved_sim_on_inherit = sim_on_inherit,
+        saved_sim_quiet = sim_quiet;
+    t_bool staying;
+    t_stat stat, stat_nomessage;
 
-stat = SCPE_OK;
-staying = TRUE;
-if (flag > 0)                                           /* need switches? */
-    GET_SWITCHES (fcptr);                               /* get switches */
-echo = (sim_switches & SWMASK ('V')) || sim_do_echo;    /* -v means echo */
-sim_quiet = (sim_switches & SWMASK ('Q')) || sim_quiet; /* -q means quiet */
-sim_on_inherit =(sim_switches & SWMASK ('O')) || sim_on_inherit; /* -o means inherit ON condition actions */
+    stat = SCPE_OK;
+    staying = TRUE;
+    if (flag > 0)                                           /* need switches? */
+        GET_SWITCHES (fcptr);                               /* get switches */
+    echo = (sim_switches & SWMASK ('V')) || sim_do_echo;    /* -v means echo */
+    sim_quiet = (sim_switches & SWMASK ('Q')) || sim_quiet; /* -q means quiet */
+    sim_on_inherit = (sim_switches & SWMASK ('O')) || sim_on_inherit; /* -o means inherit ON condition actions */
 
-errabort = sim_switches & SWMASK ('E');                 /* -e means abort on error */
+    errabort = sim_switches & SWMASK ('E');                 /* -e means abort on error */
 
-abuf[sizeof(abuf)-1] = '\0';
-strlcpy (abuf, fcptr, sizeof(abuf));
-c = abuf;
-do_arg[10] = NULL;                                      /* make sure the argument list always ends with a NULL */
-for (nargs = 0; nargs < 10; ) {                         /* extract arguments */
-    while (sim_isspace (*c))                            /* skip blanks */
-        c++;
-    if (*c == 0)                                        /* all done? */
-        do_arg [nargs++] = NULL;                        /* null argument */
-    else {
-        if (*c == '\'' || *c == '"')                    /* quoted string? */
-            quote = *c++;
-        else quote = 0;
-        do_arg[nargs++] = c;                            /* save start */
-        while (*c && (quote ? (*c != quote) : !sim_isspace (*c)))
+    abuf[sizeof (abuf) - 1] = '\0';
+    strlcpy (abuf, fcptr, sizeof (abuf));
+    c = abuf;
+    do_arg[10] = NULL;                                      /* make sure the argument list always ends with a NULL */
+    for (nargs = 0; nargs < 10; ) {                         /* extract arguments */
+        while (sim_isspace (*c))                            /* skip blanks */
             c++;
-        if (*c)                                         /* term at quote/spc */
-            *c++ = 0;
+        if (*c == 0)                                        /* all done? */
+            do_arg[nargs++] = NULL;                        /* null argument */
+        else {
+            if (*c == '\'' || *c == '"')                    /* quoted string? */
+                quote = *c++;
+            else quote = 0;
+            do_arg[nargs++] = c;                            /* save start */
+            while (*c && (quote ? (*c != quote) : !sim_isspace (*c)))
+                c++;
+            if (*c)                                         /* term at quote/spc */
+                *c++ = 0;
         }
     }                                                   /* end for */
 
-if (do_arg [0] == NULL)                                 /* need at least 1 */
-    return SCPE_2FARG;
-if ((fpin = fopen (do_arg[0], "r")) == NULL) {          /* file failed to open? */
-    strlcpy (cbuf, do_arg[0], sizeof (cbuf));           /* try again with .sim extension */
-    strlcat (cbuf, ".sim", sizeof (cbuf));
-    if ((fpin = fopen (cbuf, "r")) == NULL) {           /* failed a second time? */
-        if (flag == 0)                                  /* cmd line file? */
-             fprintf (stderr, "Can't open file %s\n", do_arg[0]);
-        return SCPE_OPENERR;                            /* return failure */
+    if (do_arg[0] == NULL)                                 /* need at least 1 */
+        return SCPE_2FARG;
+    if ((fpin = fopen (do_arg[0], "r")) == NULL) {          /* file failed to open? */
+        strlcpy (cbuf, do_arg[0], sizeof (cbuf));           /* try again with .sim extension */
+        strlcat (cbuf, ".sim", sizeof (cbuf));
+        if ((fpin = fopen (cbuf, "r")) == NULL) {           /* failed a second time? */
+            if (flag == 0)                                  /* cmd line file? */
+                fprintf (stderr, "Can't open file %s\n", do_arg[0]);
+            return SCPE_OPENERR;                            /* return failure */
         }
     }
-if (flag >= 0) {                                        /* Only bump nesting from command or nested */
-    ++sim_do_depth;
-    if (sim_on_inherit) {                               /* inherit ON condition actions? */
-        sim_on_check[sim_do_depth] = sim_on_check[sim_do_depth-1]; /* inherit On mode */
-        for (i=0; i<=SCPE_MAX_ERR; i++) {               /* replicate appropriate on commands */
-            if (sim_on_actions[sim_do_depth-1][i]) {
-                sim_on_actions[sim_do_depth][i] = (char *)malloc(1+strlen(sim_on_actions[sim_do_depth-1][i]));
-                if (NULL == sim_on_actions[sim_do_depth][i]) {
-                    while (--i >= 0) {
-                        free(sim_on_actions[sim_do_depth][i]);
-                        sim_on_actions[sim_do_depth][i] = NULL;
+    if (flag >= 0) {                                        /* Only bump nesting from command or nested */
+        ++sim_do_depth;
+        if (sim_on_inherit) {                               /* inherit ON condition actions? */
+            sim_on_check[sim_do_depth] = sim_on_check[sim_do_depth - 1]; /* inherit On mode */
+            for (i = 0; i <= SCPE_MAX_ERR; i++) {               /* replicate appropriate on commands */
+                if (sim_on_actions[sim_do_depth - 1][i]) {
+                    sim_on_actions[sim_do_depth][i] = (char*) malloc (1 + strlen (sim_on_actions[sim_do_depth - 1][i]));
+                    if (NULL == sim_on_actions[sim_do_depth][i]) {
+                        while (--i >= 0) {
+                            free (sim_on_actions[sim_do_depth][i]);
+                            sim_on_actions[sim_do_depth][i] = NULL;
                         }
-                    sim_on_check[sim_do_depth] = 0;
-                    sim_brk_clract ();                  /* defang breakpoint actions */
-                    --sim_do_depth;                     /* unwind nesting */
-                    fclose (fpin);
-                    return SCPE_MEM;
+                        sim_on_check[sim_do_depth] = 0;
+                        sim_brk_clract ();                  /* defang breakpoint actions */
+                        --sim_do_depth;                     /* unwind nesting */
+                        fclose (fpin);
+                        return SCPE_MEM;
                     }
-                strcpy(sim_on_actions[sim_do_depth][i], sim_on_actions[sim_do_depth-1][i]);
+                    strcpy (sim_on_actions[sim_do_depth][i], sim_on_actions[sim_do_depth - 1][i]);
                 }
             }
         }
     }
 
-strlcpy( sim_do_filename[sim_do_depth], do_arg[0],
-         sizeof (sim_do_filename[sim_do_depth]));       /* stash away do file name for possible use by 'call' command */
-sim_do_label[sim_do_depth] = label;                     /* stash away do label for possible use in messages */
-sim_goto_line[sim_do_depth] = 0;
-if (label) {
-    sim_gotofile = fpin;
-    sim_do_echo = echo;
-    stat = goto_cmd (0, label);
-    if (stat != SCPE_OK) {
-        strcpy(cbuf, "RETURN SCPE_ARG");
-        cptr = get_glyph (cbuf, gbuf, 0);               /* get command glyph */
-        cmdp = find_cmd (gbuf);                         /* return the errorStage things to the stat will be returned */
-        goto Cleanup_Return;
+    sim_debug (SIM_DBG_DO, sim_dflt_dev, "do_cmd_label(%d, flag=%d, '%s', '%s')\n", sim_do_depth, flag, fcptr, label ? label : "");
+    strlcpy (sim_do_filename[sim_do_depth], do_arg[0],
+        sizeof (sim_do_filename[sim_do_depth]));       /* stash away do file name for possible use by 'call' command */
+    sim_do_label[sim_do_depth] = label;                     /* stash away do label for possible use in messages */
+    sim_goto_line[sim_do_depth] = 0;
+    if (label) {
+        sim_gotofile = fpin;
+        sim_do_echo = echo;
+        stat = goto_cmd (0, label);
+        if (stat != SCPE_OK) {
+            strcpy (cbuf, "RETURN SCPE_ARG");
+            cptr = get_glyph (cbuf, gbuf, 0);               /* get command glyph */
+            cmdp = find_cmd (gbuf);                         /* return the errorStage things to the stat will be returned */
+            goto Cleanup_Return;
         }
     }
-if (errabort)                                           /* -e flag? */
-    set_on (1, NULL);                                   /* equivalent to ON ERROR RETURN */
+    if (errabort)                                           /* -e flag? */
+        set_on (1, NULL);                                   /* equivalent to ON ERROR RETURN */
 
-do {
-    if (stop_cpu) {                                     /* SIGINT? */
-        if (sim_on_actions[sim_do_depth][ON_SIGINT_ACTION]) {
-            stop_cpu = FALSE;
-            sim_brk_setact (sim_on_actions[sim_do_depth][ON_SIGINT_ACTION]);/* Use specified action */
+    do {
+        if (stop_cpu) {                                     /* SIGINT? */
+            if (sim_on_actions[sim_do_depth][ON_SIGINT_ACTION]) {
+                stop_cpu = FALSE;
+                sim_brk_setact (sim_on_actions[sim_do_depth][ON_SIGINT_ACTION]);/* Use specified action */
             }
-        else
-            break;                                      /* Exit this command procedure */
-        }
-    sim_do_ocptr[sim_do_depth] = cptr = sim_brk_getact (cbuf, sizeof(cbuf)); /* get bkpt action */
-    if (!sim_do_ocptr[sim_do_depth]) {                  /* no pending action? */
-        sim_do_ocptr[sim_do_depth] = cptr = read_line (cbuf, sizeof(cbuf), fpin);/* get cmd line */
-        sim_goto_line[sim_do_depth] += 1;
-        }
-    sim_sub_args (cbuf, sizeof(cbuf), do_arg);          /* substitute args */
-    if (cptr == NULL) {                                 /* EOF? */
-        stat = SCPE_OK;                                 /* set good return */
-        break;
-        }
-    if (*cptr == 0)                                     /* ignore blank */
-        continue;
-    if (echo)                                           /* echo if -v */
-        sim_printf("%s> %s\n", do_position(), cptr);
-    sim_cmd_echoed = echo;
-    if (*cptr == ':')                                   /* ignore label */
-        continue;
-    cptr = get_glyph_cmd (cptr, gbuf);                  /* get command glyph */
-    sim_switches = 0;                                   /* init switches */
-    sim_gotofile = fpin;
-    sim_do_echo = echo;
-    if ((cmdp = find_cmd (gbuf))) {                     /* lookup command */
-        if (cmdp->action == &return_cmd)                /* RETURN command? */
-            break;                                      /*    done! */
-        if (cmdp->action == &do_cmd) {                  /* DO command? */
-            if (sim_do_depth >= MAX_DO_NEST_LVL)        /* nest too deep? */
-                stat = SCPE_NEST;
             else
-                stat = do_cmd (sim_do_depth+1, cptr);   /* exec DO cmd */
+                break;                                      /* Exit this command procedure */
+        }
+        sim_do_ocptr[sim_do_depth] = cptr = sim_brk_getact (cbuf, sizeof (cbuf)); /* get bkpt action */
+        if (!sim_do_ocptr[sim_do_depth]) {                  /* no pending action? */
+            sim_do_ocptr[sim_do_depth] = cptr = read_line (cbuf, sizeof (cbuf), fpin);/* get cmd line */
+            sim_goto_line[sim_do_depth] += 1;
+        }
+        if (cptr == NULL) {                                 /* EOF? */
+            stat = SCPE_OK;                                 /* set good return */
+            break;
+        }
+        sim_debug (SIM_DBG_DO, sim_dflt_dev, "Input Command:    %s\n", cbuf);
+        sim_sub_args (cbuf, sizeof (cbuf), do_arg);          /* substitute args */
+        sim_debug (SIM_DBG_DO, sim_dflt_dev, "Expanded Command: %s\n", cbuf);
+        if (*cptr == 0)                                     /* ignore blank */
+            continue;
+        if (echo)                                           /* echo if -v */
+            sim_printf ("%s> %s\n", do_position (), cptr);
+        sim_cmd_echoed = echo;
+        if (*cptr == ':')                                   /* ignore label */
+            continue;
+        cptr = get_glyph_cmd (cptr, gbuf);                  /* get command glyph */
+        sim_switches = 0;                                   /* init switches */
+        sim_gotofile = fpin;
+        sim_do_echo = echo;
+        if ((cmdp = find_cmd (gbuf))) {                     /* lookup command */
+            if (cmdp->action == &return_cmd)                /* RETURN command? */
+                break;                                      /*    done! */
+            if (cmdp->action == &do_cmd) {                  /* DO command? */
+                if (sim_do_depth >= MAX_DO_NEST_LVL)        /* nest too deep? */
+                    stat = SCPE_NEST;
+                else
+                    stat = do_cmd (sim_do_depth + 1, cptr);   /* exec DO cmd */
             }
-        else
-            if (cmdp->action == &shift_cmd)             /* SHIFT command */
-                stat = shift_args(do_arg, sizeof(do_arg)/sizeof(do_arg[0]));
             else
-                stat = cmdp->action (cmdp->arg, cptr);  /* exec other cmd */
+                if (cmdp->action == &shift_cmd)             /* SHIFT command */
+                    stat = shift_args (do_arg, sizeof (do_arg) / sizeof (do_arg[0]));
+                else
+                    stat = cmdp->action (cmdp->arg, cptr);  /* exec other cmd */
         }
-    else
-        stat = SCPE_UNK;                                /* bad cmd given */
-    echo = sim_do_echo;                                 /* Allow for SET VERIFY */
-    stat_nomessage = stat & SCPE_NOMESSAGE;             /* extract possible message supression flag */
-    stat_nomessage = stat_nomessage || (!sim_show_message);/* Apply global suppression */
-    stat = SCPE_BARE_STATUS(stat);                      /* remove possible flag */
-    if (((stat != SCPE_OK) && (stat != SCPE_EXPECT)) ||
-        ((cmdp->action != &return_cmd) &&
-         (cmdp->action != &goto_cmd) &&
-         (cmdp->action != &on_cmd) &&
-         (cmdp->action != &echo_cmd) &&
-         (cmdp->action != &echof_cmd) &&
-         (cmdp->action != &sleep_cmd)))
-        sim_last_cmd_stat = stat;                       /* save command error status */
-    switch (stat) {
-        case SCPE_AFAIL:
-            staying = (sim_on_check[sim_do_depth] &&        /* if trap action defined */
-                       sim_on_actions[sim_do_depth][stat]); /* use it, otherwise exit */
-            break;
-        case SCPE_EXIT:
-            staying = FALSE;
-            break;
-        case SCPE_OK:
-        case SCPE_STEP:
-            break;
-        default:
-            break;
+        else
+            stat = SCPE_UNK;                                /* bad cmd given */
+        sim_debug (SIM_DBG_DO, sim_dflt_dev, "Command '%s', Result: 0x%X - %s\n", cmdp ? cmdp->name : "", stat, sim_error_text (stat));
+        echo = sim_do_echo;                                 /* Allow for SET VERIFY */
+        stat_nomessage = stat & SCPE_NOMESSAGE;             /* extract possible message supression flag */
+        stat_nomessage = stat_nomessage || (!sim_show_message);/* Apply global suppression */
+        stat = SCPE_BARE_STATUS (stat);                      /* remove possible flag */
+        if (((stat != SCPE_OK) && (stat != SCPE_EXPECT)) ||
+            ((cmdp->action != &return_cmd) &&
+            (cmdp->action != &goto_cmd) &&
+            (cmdp->action != &on_cmd) &&
+            (cmdp->action != &echo_cmd) &&
+            (cmdp->action != &echof_cmd) &&
+            (cmdp->action != &sleep_cmd)))
+            sim_last_cmd_stat = stat;                       /* save command error status */
+        switch (stat) {
+            case SCPE_AFAIL:
+                staying = (sim_on_check[sim_do_depth] &&        /* if trap action defined */
+                    sim_on_actions[sim_do_depth][stat]); /* use it, otherwise exit */
+                break;
+            case SCPE_EXIT:
+                staying = FALSE;
+                break;
+            case SCPE_OK:
+            case SCPE_STEP:
+                break;
+            default:
+                break;
         }
-    if ((stat >= SCPE_BASE) && (stat != SCPE_EXIT) &&   /* error from cmd? */
-        (stat != SCPE_STEP)) {
-        if (!echo &&                                    /* report if not echoing */
-            !stat_nomessage &&                          /* and not suppressing messages */
-            !(cmdp && cmdp->message)) {                 /* and not handling them specially */
-            sim_printf("%s> %s\n", do_position(), sim_do_ocptr[sim_do_depth]);
+        if ((stat >= SCPE_BASE) && (stat != SCPE_EXIT) &&   /* error from cmd? */
+            (stat != SCPE_STEP)) {
+            if (!echo &&                                    /* report if not echoing */
+                !stat_nomessage &&                          /* and not suppressing messages */
+                !(cmdp && cmdp->message)) {                 /* and not handling them specially */
+                sim_printf ("%s> %s\n", do_position (), sim_do_ocptr[sim_do_depth]);
             }
         }
-    if (!stat_nomessage) {                              /* report error if not suppressed */
-        if (cmdp && cmdp->message)                      /* special message handler */
-            cmdp->message ((!echo && !sim_quiet) ? sim_do_ocptr[sim_do_depth] : NULL, stat);
-        else
-            if (stat >= SCPE_BASE)                      /* report error if not suppressed */
-                sim_printf ("%s\n", sim_error_text (stat));
+        if (!stat_nomessage) {                              /* report error if not suppressed */
+            if (cmdp && cmdp->message)                      /* special message handler */
+                cmdp->message ((!echo && !sim_quiet) ? sim_do_ocptr[sim_do_depth] : NULL, stat);
+            else
+                if (stat >= SCPE_BASE)                      /* report error if not suppressed */
+                    sim_printf ("%s\n", sim_error_text (stat));
         }
-    if (stat == SCPE_EXPECT)                            /* EXPECT status is non actionable */
-        stat = SCPE_OK;                                 /* so adjust it to SCPE_OK */
-    if (staying &&
-        (sim_on_check[sim_do_depth]) &&
-        (stat != SCPE_OK) &&
-        (stat != SCPE_STEP)) {
-        if ((stat <= SCPE_MAX_ERR) && sim_on_actions[sim_do_depth][stat])
-            sim_brk_setact (sim_on_actions[sim_do_depth][stat]);
-        else
-            sim_brk_setact (sim_on_actions[sim_do_depth][0]);
+        if (stat == SCPE_EXPECT)                            /* EXPECT status is non actionable */
+            stat = SCPE_OK;                                 /* so adjust it to SCPE_OK */
+        if (staying &&
+            (sim_on_check[sim_do_depth]) &&
+            (stat != SCPE_OK) &&
+            (stat != SCPE_STEP)) {
+            if ((stat <= SCPE_MAX_ERR) && sim_on_actions[sim_do_depth][stat])
+                sim_brk_setact (sim_on_actions[sim_do_depth][stat]);
+            else
+                sim_brk_setact (sim_on_actions[sim_do_depth][0]);
         }
-    if (sim_vm_post != NULL)
-        (*sim_vm_post) (TRUE);
-    } while (staying);
+        if (sim_vm_post != NULL)
+            (*sim_vm_post) (TRUE);
+    }
+    while (staying);
 Cleanup_Return:
-fclose (fpin);                                          /* close file */
-sim_gotofile = NULL;
-if (flag >= 0) {
-    sim_do_echo = saved_sim_do_echo;                    /* restore echo state we entered with */
-    sim_show_message = saved_sim_show_message;          /* restore message display state we entered with */
-    sim_on_inherit = saved_sim_on_inherit;              /* restore ON inheritance state we entered with */
-    sim_quiet = saved_sim_quiet;                        /* restore quiet mode we entered with */
+    fclose (fpin);                                          /* close file */
+    sim_gotofile = NULL;
+    if (flag >= 0) {
+        sim_do_echo = saved_sim_do_echo;                    /* restore echo state we entered with */
+        sim_show_message = saved_sim_show_message;          /* restore message display state we entered with */
+        sim_on_inherit = saved_sim_on_inherit;              /* restore ON inheritance state we entered with */
+        sim_quiet = saved_sim_quiet;                        /* restore quiet mode we entered with */
     }
-if ((flag >= 0) || (!sim_on_inherit)) {
-    for (i=0; i<=SCPE_MAX_ERR; i++) {                    /* release any on commands */
-        free (sim_on_actions[sim_do_depth][i]);
-        sim_on_actions[sim_do_depth][i] = NULL;
+    if ((flag >= 0) || (!sim_on_inherit)) {
+        for (i = 0; i <= SCPE_MAX_ERR; i++) {                    /* release any on commands */
+            free (sim_on_actions[sim_do_depth][i]);
+            sim_on_actions[sim_do_depth][i] = NULL;
         }
-    sim_on_check[sim_do_depth] = 0;                     /* clear on mode */
+        sim_on_check[sim_do_depth] = 0;                     /* clear on mode */
     }
-if (flag >= 0)
-    --sim_do_depth;                                     /* unwind nesting */
-sim_brk_clract ();                                      /* defang breakpoint actions */
-if (cmdp && (cmdp->action == &return_cmd) && (0 != *cptr)) { /* return command with argument? */
-    sim_string_to_stat (cptr, &stat);
-    sim_last_cmd_stat = stat;                           /* save explicit status as command error status */
-    if (sim_switches & SWMASK ('Q'))
-        stat |= SCPE_NOMESSAGE;                         /* suppress error message display (in caller) if requested */
-    return stat;                                        /* return with explicit return status */
+    sim_debug (SIM_DBG_DO, sim_dflt_dev, "do_cmd_label - exiting - stat:%d (%d, flag=%d, '%s', '%s')\n", stat, sim_do_depth, flag, fcptr, label ? label : "");
+    if (flag >= 0) {
+        sim_brk_clract ();                                  /* defang breakpoint actions */
+        --sim_do_depth;                                     /* unwind nesting */
     }
-return stat | SCPE_NOMESSAGE;                           /* suppress message since we've already done that here */
+    if (cmdp && (cmdp->action == &return_cmd) && (0 != *cptr)) { /* return command with argument? */
+        sim_string_to_stat (cptr, &stat);
+        sim_last_cmd_stat = stat;                           /* save explicit status as command error status */
+        if (sim_switches & SWMASK ('Q'))
+            stat |= SCPE_NOMESSAGE;                         /* suppress error message display (in caller) if requested */
+        return stat;                                        /* return with explicit return status */
+    }
+    return stat | SCPE_NOMESSAGE;                           /* suppress message since we've already done that here */
 }
 
 /* Substitute_args - replace %n tokens in 'instr' with the do command's arguments
@@ -3599,7 +3635,7 @@ return stat | SCPE_NOMESSAGE;                           /* suppress message sinc
 */
 
 static const char*
-_sim_get_env_special (const char* gbuf, char* rbuf, size_t rbuf_size)
+_sim_gen_env_uplowcase (const char* gbuf, char* rbuf, size_t rbuf_size)
 {
     const char* ap;
     char tbuf[CBUFSIZE];
@@ -3607,175 +3643,203 @@ _sim_get_env_special (const char* gbuf, char* rbuf, size_t rbuf_size)
     ap = getenv (gbuf);                      /* first try using the literal name */
     if (!ap) {
         get_glyph (gbuf, tbuf, 0);          /* now try using the upcased name */
-        ap = getenv (tbuf);
+        if (strcmp (gbuf, tbuf))            /* upcase different? */
+            ap = getenv (tbuf);              /* lookup the upcase name */
     }
-    if (ap)                                 /* environment variable found? */
+    if (ap) {                               /* environment variable found? */
         strlcpy (rbuf, ap, rbuf_size);      /* Return the environment value */
-    else {                                  /* otherwise, check for Special Names */
-        time_t now = (time_t) cmd_time.tv_sec;
-        struct tm* tmnow = localtime (&now);
-
-        /* ISO 8601 format date/time info */
-        if (!strcmp ("DATE", gbuf)) {
-            sprintf (rbuf, "%4d-%02d-%02d", tmnow->tm_year + 1900, tmnow->tm_mon + 1, tmnow->tm_mday);
-            ap = rbuf;
-        }
-        else if (!strcmp ("TIME", gbuf)) {
-            sprintf (rbuf, "%02d:%02d:%02d", tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATETIME", gbuf)) {
-            sprintf (rbuf, "%04d-%02d-%02dT%02d:%02d:%02d", tmnow->tm_year + 1900, tmnow->tm_mon + 1, tmnow->tm_mday, tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
-            ap = rbuf;
-        }
-        /* Locale oriented formatted date/time info */
-        else if (!strcmp ("LDATE", gbuf)) {
-            strftime (rbuf, rbuf_size, "%x", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("LTIME", gbuf)) {
-#if defined(HAVE_C99_STRFTIME)
-            strftime (rbuf, rbuf_size, "%r", tmnow);
-#else
-            strftime (rbuf, rbuf_size, "%p", tmnow);
-            if (rbuf[0])
-                strftime (rbuf, rbuf_size, "%I:%M:%S %p", tmnow);
-            else
-                strftime (rbuf, rbuf_size, "%H:%M:%S", tmnow);
-#endif
-            ap = rbuf;
-        }
-        else if (!strcmp ("CTIME", gbuf)) {
-#if defined(HAVE_C99_STRFTIME)
-            strftime (rbuf, rbuf_size, "%c", tmnow);
-#else
-            strcpy (rbuf, ctime (&now));
-            rbuf[strlen (rbuf) - 1] = '\0';    /* remove trailing \n */
-#endif
-            ap = rbuf;
-        }
-        else if (!strcmp ("UTIME", gbuf)) {
-            sprintf (rbuf, "%" LL_FMT "d", (LL_TYPE) now);
-            ap = rbuf;
-        }
-        /* Separate Date/Time info */
-        else if (!strcmp ("DATE_YYYY", gbuf)) {/* Year (0000-9999) */
-            strftime (rbuf, rbuf_size, "%Y", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_YY", gbuf)) {/* Year (00-99) */
-            strftime (rbuf, rbuf_size, "%y", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_YC", gbuf)) {/* Century (year/100) */
-            sprintf (rbuf, "%d", (tmnow->tm_year + 1900) / 100);
-            ap = rbuf;
-        }
-        else if ((!strcmp ("DATE_19XX_YY", gbuf)) || /* Year with same calendar */
-            (!strcmp ("DATE_19XX_YYYY", gbuf))) {
-            int year = tmnow->tm_year + 1900;
-            int days = year - 2001;
-            int leaps = days / 4 - days / 100 + days / 400;
-            int lyear = ((year % 4) == 0) && (((year % 100) != 0) || ((year % 400) == 0));
-            int selector = ((days + leaps + 7) % 7) + lyear * 7;
-            static int years[] = {90, 91, 97, 98, 99, 94, 89,
-                                  96, 80, 92, 76, 88, 72, 84};
-            int cal_year = years[selector];
-
-            if (!strcmp ("DATE_19XX_YY", gbuf))
-                sprintf (rbuf, "%d", cal_year);        /* 2 digit year */
-            else
-                sprintf (rbuf, "%d", cal_year + 1900); /* 4 digit year */
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_MM", gbuf)) {/* Month number (01-12) */
-            strftime (rbuf, sizeof (rbuf), "%m", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_MMM", gbuf)) {/* abbreviated Month name */
-            strftime (rbuf, sizeof (rbuf), "%b", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_MONTH", gbuf)) {/* full Month name */
-            strftime (rbuf, sizeof (rbuf), "%B", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_DD", gbuf)) {/* Day of Month (01-31) */
-            strftime (rbuf, sizeof (rbuf), "%d", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_D", gbuf)) { /* ISO 8601 weekday number (1-7) */
-            sprintf (rbuf, "%d", (tmnow->tm_wday ? tmnow->tm_wday : 7));
-            ap = rbuf;
-        }
-        else if ((!strcmp ("DATE_WW", gbuf)) ||   /* ISO 8601 week number (01-53) */
-            (!strcmp ("DATE_WYYYY", gbuf))) {/* ISO 8601 week year number (0000-9999) */
-            int iso_yr = tmnow->tm_year + 1900;
-            int iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7)) / 7;;
-
-            if (iso_wk == 0) {
-                iso_yr = iso_yr - 1;
-                tmnow->tm_yday += 365 + (((iso_yr % 4) == 0) ? 1 : 0);  /* Adjust for Leap Year (Correct thru 2099) */
-                iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7)) / 7;
-            }
-            else
-                if ((iso_wk == 53) && (((31 - tmnow->tm_mday) + tmnow->tm_wday) < 4)) {
-                    ++iso_yr;
-                    iso_wk = 1;
-                }
-            if (!strcmp ("DATE_WW", gbuf))
-                sprintf (rbuf, "%02d", iso_wk);
-            else
-                sprintf (rbuf, "%04d", iso_yr);
-            ap = rbuf;
-        }
-        else if (!strcmp ("DATE_JJJ", gbuf)) {/* day of year (001-366) */
-            strftime (rbuf, sizeof (rbuf), "%j", tmnow);
-            ap = rbuf;
-            }
-        else if (!strcmp ("TIME_HH", gbuf)) {/* Hour of day (00-23) */
-            strftime (rbuf, sizeof (rbuf), "%H", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("TIME_MM", gbuf)) {/* Minute of hour (00-59) */
-            strftime (rbuf, sizeof (rbuf), "%M", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("TIME_SS", gbuf)) {/* Second of minute (00-59) */
-            strftime (rbuf, sizeof (rbuf), "%S", tmnow);
-            ap = rbuf;
-        }
-        else if (!strcmp ("TIME_MSEC", gbuf)) {/* Milliseconds of Second (000-999) */
-            sprintf (rbuf, "%03d", (int) (cmd_time.tv_nsec / 1000000));
-            ap = rbuf;
-        }
-        else if (!strcmp ("STATUS", gbuf)) {
-            sprintf (rbuf, "%08X", sim_last_cmd_stat);
-            ap = rbuf;
-        }
-        else if (!strcmp ("TSTATUS", gbuf)) {
-            sprintf (rbuf, "%s", sim_error_text (sim_last_cmd_stat));
-            ap = rbuf;
-        }
-        else if (!strcmp ("SIM_VERIFY", gbuf)) {
-            sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
-            ap = rbuf;
-        }
-        else if (!strcmp ("SIM_VERBOSE", gbuf)) {
-            sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
-            ap = rbuf;
-        }
-        else if (!strcmp ("SIM_QUIET", gbuf)) {
-            sprintf (rbuf, "%s", sim_quiet ? "-Q" : "");
-            ap = rbuf;
-        }
-        else if (!strcmp ("SIM_MESSAGE", gbuf)) {
-            sprintf (rbuf, "%s", sim_show_message ? "" : "-Q");
-            ap = rbuf;
-        }
-        }
-    return ap;
+        ap = rbuf;
     }
+    return ap;
+}
+
+static const char*
+_sim_get_env_special (const char* gbuf, char* rbuf, size_t rbuf_size)
+{
+	const char* ap;
+
+	ap = _sim_gen_env_uplowcase (gbuf, rbuf, rbuf_size);/* Look for environment variable */
+	if (!ap) {
+		time_t now = (time_t) cmd_time.tv_sec;
+		struct tm* tmnow = localtime (&now);
+
+		/* ISO 8601 format date/time info */
+		if (!strcmp ("DATE", gbuf)) {
+			sprintf (rbuf, "%4d-%02d-%02d", tmnow->tm_year + 1900, tmnow->tm_mon + 1, tmnow->tm_mday);
+			ap = rbuf;
+		}
+		else if (!strcmp ("TIME", gbuf)) {
+			sprintf (rbuf, "%02d:%02d:%02d", tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATETIME", gbuf)) {
+			sprintf (rbuf, "%04d-%02d-%02dT%02d:%02d:%02d", tmnow->tm_year + 1900, tmnow->tm_mon + 1, tmnow->tm_mday, tmnow->tm_hour, tmnow->tm_min, tmnow->tm_sec);
+			ap = rbuf;
+		}
+		/* Locale oriented formatted date/time info */
+		else if (!strcmp ("LDATE", gbuf)) {
+			strftime (rbuf, rbuf_size, "%x", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("LTIME", gbuf)) {
+#if defined(HAVE_C99_STRFTIME)
+			strftime (rbuf, rbuf_size, "%r", tmnow);
+#else
+			strftime (rbuf, rbuf_size, "%p", tmnow);
+			if (rbuf[0])
+				strftime (rbuf, rbuf_size, "%I:%M:%S %p", tmnow);
+			else
+				strftime (rbuf, rbuf_size, "%H:%M:%S", tmnow);
+#endif
+			ap = rbuf;
+		}
+		else if (!strcmp ("CTIME", gbuf)) {
+#if defined(HAVE_C99_STRFTIME)
+			strftime (rbuf, rbuf_size, "%c", tmnow);
+#else
+			strcpy (rbuf, ctime (&now));
+			rbuf[strlen (rbuf) - 1] = '\0';    /* remove trailing \n */
+#endif
+			ap = rbuf;
+		}
+		else if (!strcmp ("UTIME", gbuf)) {
+			sprintf (rbuf, "%" LL_FMT "d", (LL_TYPE) now);
+			ap = rbuf;
+		}
+		/* Separate Date/Time info */
+		else if (!strcmp ("DATE_YYYY", gbuf)) {/* Year (0000-9999) */
+			strftime (rbuf, rbuf_size, "%Y", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_YY", gbuf)) {/* Year (00-99) */
+			strftime (rbuf, rbuf_size, "%y", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_YC", gbuf)) {/* Century (year/100) */
+			sprintf (rbuf, "%d", (tmnow->tm_year + 1900) / 100);
+			ap = rbuf;
+		}
+		else if ((!strcmp ("DATE_19XX_YY", gbuf)) || /* Year with same calendar */
+			(!strcmp ("DATE_19XX_YYYY", gbuf))) {
+			int year = tmnow->tm_year + 1900;
+			int days = year - 2001;
+			int leaps = days / 4 - days / 100 + days / 400;
+			int lyear = ((year % 4) == 0) && (((year % 100) != 0) || ((year % 400) == 0));
+			int selector = ((days + leaps + 7) % 7) + lyear * 7;
+			static int years[] = {90, 91, 97, 98, 99, 94, 89,
+								  96, 80, 92, 76, 88, 72, 84};
+			int cal_year = years[selector];
+
+			if (!strcmp ("DATE_19XX_YY", gbuf))
+				sprintf (rbuf, "%d", cal_year);        /* 2 digit year */
+			else
+				sprintf (rbuf, "%d", cal_year + 1900); /* 4 digit year */
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_MM", gbuf)) {/* Month number (01-12) */
+			strftime (rbuf, sizeof (rbuf), "%m", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_MMM", gbuf)) {/* abbreviated Month name */
+			strftime (rbuf, sizeof (rbuf), "%b", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_MONTH", gbuf)) {/* full Month name */
+			strftime (rbuf, sizeof (rbuf), "%B", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_DD", gbuf)) {/* Day of Month (01-31) */
+			strftime (rbuf, sizeof (rbuf), "%d", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_D", gbuf)) { /* ISO 8601 weekday number (1-7) */
+			sprintf (rbuf, "%d", (tmnow->tm_wday ? tmnow->tm_wday : 7));
+			ap = rbuf;
+		}
+		else if ((!strcmp ("DATE_WW", gbuf)) ||   /* ISO 8601 week number (01-53) */
+			(!strcmp ("DATE_WYYYY", gbuf))) {/* ISO 8601 week year number (0000-9999) */
+			int iso_yr = tmnow->tm_year + 1900;
+			int iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7)) / 7;;
+
+			if (iso_wk == 0) {
+				iso_yr = iso_yr - 1;
+				tmnow->tm_yday += 365 + (((iso_yr % 4) == 0) ? 1 : 0);  /* Adjust for Leap Year (Correct thru 2099) */
+				iso_wk = (tmnow->tm_yday + 11 - (tmnow->tm_wday ? tmnow->tm_wday : 7)) / 7;
+			}
+			else
+				if ((iso_wk == 53) && (((31 - tmnow->tm_mday) + tmnow->tm_wday) < 4)) {
+					++iso_yr;
+					iso_wk = 1;
+				}
+			if (!strcmp ("DATE_WW", gbuf))
+				sprintf (rbuf, "%02d", iso_wk);
+			else
+				sprintf (rbuf, "%04d", iso_yr);
+			ap = rbuf;
+		}
+		else if (!strcmp ("DATE_JJJ", gbuf)) {/* day of year (001-366) */
+			strftime (rbuf, sizeof (rbuf), "%j", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("TIME_HH", gbuf)) {/* Hour of day (00-23) */
+			strftime (rbuf, sizeof (rbuf), "%H", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("TIME_MM", gbuf)) {/* Minute of hour (00-59) */
+			strftime (rbuf, sizeof (rbuf), "%M", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("TIME_SS", gbuf)) {/* Second of minute (00-59) */
+			strftime (rbuf, sizeof (rbuf), "%S", tmnow);
+			ap = rbuf;
+		}
+		else if (!strcmp ("TIME_MSEC", gbuf)) {/* Milliseconds of Second (000-999) */
+			sprintf (rbuf, "%03d", (int) (cmd_time.tv_nsec / 1000000));
+			ap = rbuf;
+		}
+		else if (!strcmp ("STATUS", gbuf)) {
+			sprintf (rbuf, "%08X", sim_last_cmd_stat);
+			ap = rbuf;
+		}
+		else if (!strcmp ("TSTATUS", gbuf)) {
+			sprintf (rbuf, "%s", sim_error_text (sim_last_cmd_stat));
+			ap = rbuf;
+		}
+		else if (!strcmp ("SIM_VERIFY", gbuf)) {
+			sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
+			ap = rbuf;
+		}
+		else if (!strcmp ("SIM_VERBOSE", gbuf)) {
+			sprintf (rbuf, "%s", sim_do_echo ? "-V" : "");
+			ap = rbuf;
+		}
+		else if (!strcmp ("SIM_QUIET", gbuf)) {
+			sprintf (rbuf, "%s", sim_quiet ? "-Q" : "");
+			ap = rbuf;
+		}
+		else if (!strcmp ("SIM_MESSAGE", gbuf)) {
+			sprintf (rbuf, "%s", sim_show_message ? "" : "-Q");
+			ap = rbuf;
+		}
+	}
+	return ap;
+}
+
+/* Substitute_args - replace %n tokens in 'instr' with the do command's arguments
+
+   Calling sequence
+   instr        =       input string
+   tmpbuf       =       temp buffer
+   maxstr       =       min (len (instr), len (tmpbuf))
+   do_arg[10]   =       arguments
+
+   Token "%0" represents the command file name.
+
+   The input sequence "\%" represents a literal "%", and "\\" represents a
+   literal "\".  All other character combinations are rendered literally.
+
+   Omitted parameters result in null-string substitutions.
+*/
 
 void sim_sub_args (char* instr, size_t instr_size, char* do_arg[])
 {
@@ -3787,6 +3851,7 @@ void sim_sub_args (char* instr, size_t instr_size, char* do_arg[])
     size_t instr_off = 0;
     size_t outstr_off = 0;
 
+    sim_exp_argv = do_arg;
     clock_gettime (CLOCK_REALTIME, &cmd_time);
     tmpbuf = (char*) malloc (instr_size);
     op = tmpbuf;
@@ -6418,6 +6483,8 @@ for (i = 0; i < start; i++) {
         return SCPE_IERR;
     }
 for (i = start; (dptr = sim_devices[i]) != NULL; i++) {
+    if (sim_switches & SWMASK ('P'))
+        tmxr_add_debug (dptr);          /* Add TMXR debug to MUX devices */
     if (dptr->reset != NULL) {
         reason = dptr->reset (dptr);
         if (reason != SCPE_OK)
@@ -6440,8 +6507,49 @@ static DEBTAB scp_debug[] = {
   {"QUEUE",     SIM_DBG_AIO_QUEUE,  "asynch event queue activities"},
   {"EXPSTACK",  SIM_DBG_EXP_STACK,  "expression stack activities"},
   {"EXPEVAL",   SIM_DBG_EXP_EVAL,   "expression evaluation activities"},
+  {"ACTION",    SIM_DBG_BRK_ACTION, "action activities"},
+  {"DO",        SIM_DBG_DO,         "do activities"},
   {0}
 };
+
+t_stat sim_add_debug_flags (DEVICE* dptr, DEBTAB* debflags)
+{
+    dptr->flags |= DEV_DEBUG;
+    if (!dptr->debflags)
+        dptr->debflags = debflags;
+    else {
+        DEBTAB* cdptr, * sdptr, * ndptr;
+
+        for (sdptr = debflags; sdptr->name; sdptr++) {
+            for (cdptr = dptr->debflags; cdptr->name; cdptr++) {
+                if (sdptr->mask == cdptr->mask)
+                    break;
+            }
+            if (sdptr->mask != cdptr->mask) {
+                int i, dcount = 0;
+
+                for (cdptr = dptr->debflags; cdptr->name; cdptr++)
+                    dcount++;
+                for (cdptr = debflags; cdptr->name; cdptr++)
+                    dcount++;
+                ndptr = (DEBTAB*) calloc (1 + dcount, sizeof (*ndptr));
+                for (dcount = 0, cdptr = dptr->debflags; cdptr->name; cdptr++)
+                    ndptr[dcount++] = *cdptr;
+                for (cdptr = debflags; cdptr->name; cdptr++) {
+                    for (i = 0; i < dcount; i++) {
+                        if (cdptr->mask == ndptr[i].mask)
+                            break;
+                    }
+                    if (i == dcount)
+                        ndptr[dcount++] = *cdptr;
+                }
+                dptr->debflags = ndptr;
+                break;
+            }
+        }
+    }
+    return SCPE_OK;
+}
 
 /* Reset to powerup state
 
@@ -6453,49 +6561,15 @@ static DEBTAB scp_debug[] = {
 
 t_stat reset_all_p (uint32 start)
 {
-	t_stat r;
-	int32 old_sw = sim_switches;
+    t_stat r;
+    int32 old_sw = sim_switches;
 
-	sim_switches = SWMASK ('P');
-	r = reset_all (start);
-	sim_switches = old_sw;
-	if (sim_dflt_dev) { /* Make sure that SCP debug options are available */
-		sim_dflt_dev->flags |= DEV_DEBUG;
-		if (!sim_dflt_dev->debflags)
-			sim_dflt_dev->debflags = scp_debug;
-		else {
-			DEBTAB* cdptr, * sdptr, * ndptr;
-
-			for (sdptr = scp_debug; sdptr->name; sdptr++) {
-				for (cdptr = sim_dflt_dev->debflags; cdptr->name; cdptr++) {
-					if (sdptr->mask == cdptr->mask)
-						break;
-				}
-				if (sdptr->mask != cdptr->mask) {
-					int i, dcount = 0;
-
-					for (cdptr = sim_dflt_dev->debflags; cdptr->name; cdptr++)
-						dcount++;
-					for (cdptr = scp_debug; cdptr->name; cdptr++)
-						dcount++;
-					ndptr = (DEBTAB*) calloc (1 + dcount, sizeof (*ndptr));
-					for (dcount = 0, cdptr = sim_dflt_dev->debflags; cdptr->name; cdptr++)
-						ndptr[dcount++] = *cdptr;
-					for (cdptr = scp_debug; cdptr->name; cdptr++) {
-						for (i = 0; i < dcount; i++) {
-							if (cdptr->mask == ndptr[i].mask)
-								break;
-						}
-						if (i == dcount)
-							ndptr[dcount++] = *cdptr;
-					}
-					sim_dflt_dev->debflags = ndptr;
-					break;
-				}
-			}
-		}
-	}
-	return r;
+    sim_switches = SWMASK ('P');
+    r = reset_all (start);
+    sim_switches = old_sw;
+    if (sim_dflt_dev)   /* Make sure that SCP debug options are available */
+        sim_add_debug_flags (sim_dflt_dev, scp_debug);
+    return r;
 }
 
 /* Load and dump commands
@@ -7906,6 +7980,7 @@ char gbuf[CBUFSIZE];
 CONST char *gptr;
 CONST char *tptr = NULL;
 int32 opt;
+const char* ap;
 t_addr low, high;
 t_stat reason;
 DEVICE *tdptr;
@@ -7977,6 +8052,10 @@ for (gptr = gbuf, reason = SCPE_OK;
         continue;
         }
 
+    if ((ap = getenv (gptr))) {
+        strlcpy (gbuf, ap, sizeof (gbuf));
+        gptr = gbuf;
+    }
     tptr = get_range (sim_dfdev, gptr, &low, &high, sim_dfdev->aradix,
         (((sim_dfunit->capac == 0) || (flag == EX_E))? 0:
         sim_dfunit->capac - sim_dfdev->aincr), 0);
@@ -9577,21 +9656,22 @@ return NULL;
         dptr    =       pointer to device
 */
 
-t_stat sim_register_internal_device (DEVICE *dptr)
+t_stat sim_register_internal_device (DEVICE* dptr)
 {
-uint32 i;
+	uint32 i;
 
-for (i = 0; (sim_devices[i] != NULL); i++)
-    if (sim_devices[i] == dptr)
-        return SCPE_OK;
-for (i = 0; i < sim_internal_device_count; i++)
-    if (sim_internal_devices[i] == dptr)
-        return SCPE_OK;
-++sim_internal_device_count;
-sim_internal_devices = (DEVICE **)realloc(sim_internal_devices, (sim_internal_device_count+1)*sizeof(*sim_internal_devices));
-sim_internal_devices[sim_internal_device_count-1] = dptr;
-sim_internal_devices[sim_internal_device_count] = NULL;
-return SCPE_OK;
+	for (i = 0; i < sim_internal_device_count; i++)
+		if (sim_internal_devices[i] == dptr)
+			return SCPE_OK;
+	for (i = 0; (sim_devices[i] != NULL); i++)
+		if (sim_devices[i] == dptr)
+			return SCPE_OK;
+
+	++sim_internal_device_count;
+	sim_internal_devices = (DEVICE**) realloc (sim_internal_devices, (sim_internal_device_count + 1) * sizeof (*sim_internal_devices));
+	sim_internal_devices[sim_internal_device_count - 1] = dptr;
+	sim_internal_devices[sim_internal_device_count] = NULL;
+	return SCPE_OK;
 }
 
 /* Find_dev_from_unit   find device for unit
@@ -10573,60 +10653,65 @@ return buf;
 
 t_stat sim_process_event (void)
 {
-UNIT *uptr;
-t_stat reason;
+    UNIT* uptr;
+    t_stat reason;
 
-if (stop_cpu) {                                         /* stop CPU? */
-    stop_cpu = 0;
-    return SCPE_STOP;
+    if (stop_cpu) {                                         /* stop CPU? */
+        stop_cpu = 0;
+        return SCPE_STOP;
     }
-AIO_UPDATE_QUEUE;
-UPDATE_SIM_TIME;                                        /* update sim time */
+    AIO_UPDATE_QUEUE;
+    UPDATE_SIM_TIME;                                        /* update sim time */
 
-if (sim_clock_queue == QUEUE_LIST_END) {                /* queue empty? */
-    sim_interval = noqueue_time = NOQUEUE_WAIT;         /* flag queue empty */
-    sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Queue Empty New Interval = %d\n", sim_interval);
-    return SCPE_OK;
+    if (sim_clock_queue == QUEUE_LIST_END) {                /* queue empty? */
+        sim_interval = noqueue_time = NOQUEUE_WAIT;         /* flag queue empty */
+        sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Queue Empty New Interval = %d\n", sim_interval);
+        return SCPE_OK;
     }
-sim_processing_event = TRUE;
-do {
-    uptr = sim_clock_queue;                             /* get first */
-    sim_clock_queue = uptr->next;                       /* remove first */
-    uptr->next = NULL;                                  /* hygiene */
-    uptr->time = 0;
-    if (sim_clock_queue != QUEUE_LIST_END)
-        sim_interval = sim_clock_queue->time;
-    else
-        sim_interval = noqueue_time = NOQUEUE_WAIT;
-    sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Processing Event for %s\n", sim_uname (uptr));
-    AIO_EVENT_BEGIN(uptr);
-    if (uptr->usecs_remaining)
-        reason = sim_timer_activate_after (uptr, uptr->usecs_remaining);
-    else {
-        if (uptr->action != NULL)
-            reason = uptr->action (uptr);
+    sim_processing_event = TRUE;
+    do {
+        uptr = sim_clock_queue;                             /* get first */
+        sim_clock_queue = uptr->next;                       /* remove first */
+        uptr->next = NULL;                                  /* hygiene */
+        uptr->time = 0;
+        if (sim_clock_queue != QUEUE_LIST_END)
+            sim_interval = sim_clock_queue->time;
         else
-            reason = SCPE_OK;
+            sim_interval = noqueue_time = NOQUEUE_WAIT;
+        AIO_EVENT_BEGIN (uptr);
+        if (uptr->usecs_remaining) {
+            sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Requeueing %s after %.0f usecs\n", sim_uname (uptr), uptr->usecs_remaining);
+            reason = sim_timer_activate_after (uptr, uptr->usecs_remaining);
         }
-    AIO_EVENT_COMPLETE(uptr, reason);
-    } while ((reason == SCPE_OK) &&
-             (sim_interval <= 0) &&
-             (sim_clock_queue != QUEUE_LIST_END) &&
-             (!stop_cpu));
-
-if (sim_clock_queue == QUEUE_LIST_END) {                /* queue empty? */
-    sim_interval = noqueue_time = NOQUEUE_WAIT;         /* flag queue empty */
-    sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Processing Queue Complete New Interval = %d\n", sim_interval);
+        else {
+            sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Processing Event for %s\n", sim_uname (uptr));
+            if (uptr->uname && ((*uptr->uname == '\0') || (*uptr->uname == ' ')))
+                reason = SCPE_OK;   /* do nothing breakpoint location */
+            if (uptr->action != NULL)
+                reason = uptr->action (uptr);
+            else
+                reason = SCPE_OK;
+        }
+        AIO_EVENT_COMPLETE (uptr, reason);
     }
-else
-    sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Processing Queue Complete New Interval = %d(%s)\n", sim_interval, sim_uname(sim_clock_queue));
+    while ((reason == SCPE_OK) &&
+        (sim_interval <= 0) &&
+        (sim_clock_queue != QUEUE_LIST_END) &&
+        (!stop_cpu));
 
-if ((reason == SCPE_OK) && stop_cpu) {
-    stop_cpu = FALSE;
-    reason = SCPE_STOP;
+    if (sim_clock_queue == QUEUE_LIST_END) {                /* queue empty? */
+        sim_interval = noqueue_time = NOQUEUE_WAIT;         /* flag queue empty */
+        sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Processing Queue Complete New Interval = %d\n", sim_interval);
     }
-sim_processing_event = FALSE;
-return reason;
+    else
+        sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Processing Queue Complete New Interval = %d(%s)\n", sim_interval, sim_uname (sim_clock_queue));
+
+    if ((reason == SCPE_OK) && stop_cpu) {
+        stop_cpu = FALSE;
+        reason = SCPE_STOP;
+    }
+    sim_processing_event = FALSE;
+    return reason;
 }
 
 /* sim_activate - activate (queue) event
@@ -10773,53 +10858,53 @@ return sim_timer_activate_after (uptr, usec_delay);
 
 */
 
-t_stat sim_cancel (UNIT *uptr)
+t_stat sim_cancel (UNIT* uptr)
 {
-UNIT *cptr, *nptr;
+    UNIT* cptr, * nptr;
 
-AIO_VALIDATE;
-if ((uptr->cancel) && uptr->cancel (uptr))
-    return SCPE_OK;
-if (uptr->dynflags & UNIT_TMR_UNIT)
-    sim_timer_cancel (uptr);
-AIO_CANCEL(uptr);
-AIO_UPDATE_QUEUE;
-if (sim_clock_queue == QUEUE_LIST_END)
-    return SCPE_OK;
-sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Canceling Event for %s\n", sim_uname(uptr));
-UPDATE_SIM_TIME;                                        /* update sim time */
-if (!sim_is_active (uptr))
-    return SCPE_OK;
-nptr = QUEUE_LIST_END;
+    AIO_VALIDATE;
+    if ((uptr->cancel) && uptr->cancel (uptr))
+        return SCPE_OK;
+    if (uptr->dynflags & UNIT_TMR_UNIT)
+        sim_timer_cancel (uptr);
+    AIO_CANCEL (uptr);
+    AIO_UPDATE_QUEUE;
+    if (sim_clock_queue == QUEUE_LIST_END)
+        return SCPE_OK;
+    UPDATE_SIM_TIME;                                        /* update sim time */
+    if (!sim_is_active (uptr))
+        return SCPE_OK;
+    sim_debug (SIM_DBG_EVENT, sim_dflt_dev, "Canceling Event for %s\n", sim_uname (uptr));
+    nptr = QUEUE_LIST_END;
 
-if (sim_clock_queue == uptr) {
-    nptr = sim_clock_queue = uptr->next;
-    uptr->next = NULL;                                  /* hygiene */
+    if (sim_clock_queue == uptr) {
+        nptr = sim_clock_queue = uptr->next;
+        uptr->next = NULL;                                  /* hygiene */
     }
-else {
-    for (cptr = sim_clock_queue; cptr != QUEUE_LIST_END; cptr = cptr->next) {
-        if (cptr->next == uptr) {
-            nptr = cptr->next = uptr->next;
-            uptr->next = NULL;                          /* hygiene */
-            break;                                      /* end queue scan */
+    else {
+        for (cptr = sim_clock_queue; cptr != QUEUE_LIST_END; cptr = cptr->next) {
+            if (cptr->next == uptr) {
+                nptr = cptr->next = uptr->next;
+                uptr->next = NULL;                          /* hygiene */
+                break;                                      /* end queue scan */
             }
         }
     }
-if (nptr != QUEUE_LIST_END)
-    nptr->time += (uptr->next) ? 0 : uptr->time;
-if (!uptr->next)
-    uptr->time = 0;
-uptr->usecs_remaining = 0;
-if (sim_clock_queue != QUEUE_LIST_END)
-    sim_interval = sim_clock_queue->time;
-else sim_interval = noqueue_time = NOQUEUE_WAIT;
-if (uptr->next) {
-    sim_printf ("Cancel failed for %s\n", sim_uname(uptr));
-    if (sim_deb)
-        fclose(sim_deb);
-    abort ();
+    if (nptr != QUEUE_LIST_END)
+        nptr->time += (uptr->next) ? 0 : uptr->time;
+    if (!uptr->next)
+        uptr->time = 0;
+    uptr->usecs_remaining = 0;
+    if (sim_clock_queue != QUEUE_LIST_END)
+        sim_interval = sim_clock_queue->time;
+    else sim_interval = noqueue_time = NOQUEUE_WAIT;
+    if (uptr->next) {
+        sim_printf ("Cancel failed for %s\n", sim_uname (uptr));
+        if (sim_deb)
+            fclose (sim_deb);
+        abort ();
     }
-return SCPE_OK;
+    return SCPE_OK;
 }
 
 /* sim_is_active - test for entry in queue
@@ -11335,61 +11420,81 @@ return 0;
 
 CONST char* sim_brk_getact (char* buf, int32 size)
 {
-	char* ep;
-	size_t lnt;
+    char* ep;
+    size_t lnt;
 
-	if (sim_brk_act[sim_do_depth] == NULL)                  /* any action? */
-		return NULL;
-	while (sim_isspace (*sim_brk_act[sim_do_depth]))        /* skip spaces */
-		sim_brk_act[sim_do_depth]++;
-	if (*sim_brk_act[sim_do_depth] == 0) {                  /* now empty? */
-		return sim_brk_clract ();
-	}
-	ep = strpbrk (sim_brk_act[sim_do_depth], ";\"'");       /* search for a semicolon or single or double quote */
-	if ((ep != NULL) && (*ep != ';')) {                     /* if a quoted string is present */
-		char quote = *ep++;                                 /*   then save the opening quotation mark */
+    if (sim_brk_act[sim_do_depth] == NULL)                  /* any action? */
+        return NULL;
+    while (sim_isspace (*sim_brk_act[sim_do_depth]))        /* skip spaces */
+        sim_brk_act[sim_do_depth]++;
+    if (*sim_brk_act[sim_do_depth] == 0) {                  /* now empty? */
+        return sim_brk_clract ();
+    }
+    ep = strpbrk (sim_brk_act[sim_do_depth], ";\"'");       /* search for a semicolon or single or double quote */
+    if ((ep != NULL) && (*ep != ';')) {                     /* if a quoted string is present */
+        char quote = *ep++;                                 /*   then save the opening quotation mark */
 
-		while (ep[0] != '\0' && ep[0] != quote)           /* while characters remain within the quotes */
-			if (ep[0] == '\\' && ep[1] == quote)          /*   if an escaped quote sequence follows */
-				ep = ep + 2;                                /*     then skip over the pair */
-			else                                            /*   otherwise */
-				ep = ep + 1;                                /*     skip the non-quote character */
-		ep = strchr (ep, ';');                              /* the next semicolon is outside the quotes if it exists */
-	}
-
-	if (ep != NULL) {                                       /* if a semicolon is present */
-		lnt = ep - sim_brk_act[sim_do_depth];               /* cmd length */
-		memcpy (buf, sim_brk_act[sim_do_depth], lnt + 1);   /* copy with ; */
-		buf[lnt] = 0;                                       /* erase ; */
-		sim_brk_act[sim_do_depth] += lnt + 1;               /* adv ptr */
-	}
-	else {
-		strlcpy (buf, sim_brk_act[sim_do_depth], size);     /* copy action */
-		sim_brk_clract ();                                  /* no more */
-	}
-	sim_trim_endspc (buf);
-	return buf;
+        while (ep[0] != '\0' && ep[0] != quote)           /* while characters remain within the quotes */
+            if (ep[0] == '\\' && ep[1] == quote)          /*   if an escaped quote sequence follows */
+                ep = ep + 2;                                /*     then skip over the pair */
+            else                                            /*   otherwise */
+                ep = ep + 1;                                /*     skip the non-quote character */
+        ep = strchr (ep, ';');                              /* the next semicolon is outside the quotes if it exists */
+    }
+    if (ep != NULL) {                                       /* if a semicolon is present */
+        lnt = ep - sim_brk_act[sim_do_depth];               /* cmd length */
+        memcpy (buf, sim_brk_act[sim_do_depth], lnt + 1);   /* copy with ; */
+        buf[lnt] = 0;                                       /* erase ; */
+        sim_brk_act[sim_do_depth] += lnt + 1;               /* adv ptr */
+    }
+    else {
+        strlcpy (buf, sim_brk_act[sim_do_depth], size);     /* copy action */
+        sim_brk_act[sim_do_depth] = NULL;                   /* mark as digested */
+        sim_brk_clract ();                                  /* no more */
+    }
+    sim_trim_endspc (buf);
+    sim_debug (SIM_DBG_BRK_ACTION, sim_dflt_dev, "sim_brk_getact(%d) - Returning: '%s'\n", sim_do_depth, buf);
+    return buf;
 }
 
 /* Clear pending actions */
 
-char *sim_brk_clract (void)
+char* sim_brk_clract (void)
 {
-free (sim_brk_act_buf[sim_do_depth]);
-return sim_brk_act[sim_do_depth] = sim_brk_act_buf[sim_do_depth] = NULL;
+    if (sim_brk_act[sim_do_depth])
+        sim_debug (SIM_DBG_BRK_ACTION, sim_dflt_dev, "sim_brk_clract(%d) - Clearing: '%s'\n", sim_do_depth, sim_brk_act[sim_do_depth]);
+    free (sim_brk_act_buf[sim_do_depth]);
+    return sim_brk_act[sim_do_depth] = sim_brk_act_buf[sim_do_depth] = NULL;
 }
 
 /* Set up pending actions */
 
-void sim_brk_setact (const char *action)
+void sim_brk_setact (const char* action)
 {
-if (action) {
-    sim_brk_act_buf[sim_do_depth] = (char *)realloc (sim_brk_act_buf[sim_do_depth], strlen (action) + 1);
-    strcpy (sim_brk_act_buf[sim_do_depth], action);
-    sim_brk_act[sim_do_depth] = sim_brk_act_buf[sim_do_depth];
+    if (action) {
+        if (sim_brk_act[sim_do_depth] && (*sim_brk_act[sim_do_depth])) {
+            /* push new actions ahead of whatever is already pending */
+            size_t old_size = strlen (sim_brk_act[sim_do_depth]);
+            size_t new_size = strlen (action) + old_size + 3;
+            char* old_action = (char*) malloc (1 + old_size);
+
+            strlcpy (old_action, sim_brk_act[sim_do_depth], 1 + old_size);
+            sim_brk_act_buf[sim_do_depth] = (char*) realloc (sim_brk_act_buf[sim_do_depth], new_size);
+            strlcpy (sim_brk_act_buf[sim_do_depth], action, new_size);
+            strlcat (sim_brk_act_buf[sim_do_depth], "; ", new_size);
+            strlcat (sim_brk_act_buf[sim_do_depth], old_action, new_size);
+            sim_debug (SIM_DBG_BRK_ACTION, sim_dflt_dev, "sim_brk_setact(%d) - Pushed: '%s' ahead of: '%s'\n", sim_do_depth, action, old_action);
+            free (old_action);
+        }
+        else {
+            sim_brk_act_buf[sim_do_depth] = (char*) realloc (sim_brk_act_buf[sim_do_depth], strlen (action) + 1);
+            strcpy (sim_brk_act_buf[sim_do_depth], action);
+            sim_debug (SIM_DBG_BRK_ACTION, sim_dflt_dev, "sim_brk_setact(%d) - Set to: '%s'\n", sim_do_depth, action);
+        }
+        sim_brk_act[sim_do_depth] = sim_brk_act_buf[sim_do_depth];
     }
-else
-    sim_brk_clract ();
+    else
+        sim_brk_clract ();
 }
 
 char *sim_brk_replace_act (char *new_action)
@@ -11978,6 +12083,9 @@ if (i != exp->size) {                                   /* Found? */
                                          ep->cnt, (ep->cnt == 1) ? "" : "es");
         }
     else {
+        uint32 after = ep->after;
+        int32 switches = ep->switches;
+
         if (ep->act && *ep->act) {
             sim_debug (exp->dbit, exp->dptr, "Initiating actions: %s\n", ep->act);
             }
@@ -11992,9 +12100,9 @@ if (i != exp->size) {                                   /* Found? */
                 sim_exp_clr_tab (exp, ep);              /* delete it */
             }
         sim_activate (&sim_expect_unit,                 /* schedule simulation stop when indicated */
-                      (ep->switches & EXP_TYP_TIME) ?
-                            (int32)((sim_timer_inst_per_sec ()*ep->after)/1000000.0) :
-                            ep->after);
+            (switches& EXP_TYP_TIME) ?
+                (int32) ((sim_timer_inst_per_sec () * after) / 1000000.0) :
+                after);
         }
     /* Matched data is no longer available for future matching */
     exp->buf_data = exp->buf_ins = 0;
@@ -13772,17 +13880,17 @@ static t_svalue _op_log_not (t_svalue data, t_svalue unused)
 
 static t_svalue _op_log_and (t_svalue data1, t_svalue data2)
 {
-    return data1 && data2;
+    return data2 && data1;
 }
 
 static t_svalue _op_log_or (t_svalue data1, t_svalue data2)
 {
-    return data1 || data2;
+    return data2 || data1;
 }
 
 static t_svalue _op_bit_and (t_svalue data1, t_svalue data2)
 {
-    return data1 & data2;
+    return data2 & data1;
 }
 
 static t_svalue _op_bit_rsh (t_svalue shift, t_svalue data)
@@ -13797,72 +13905,77 @@ static t_svalue _op_bit_lsh (t_svalue shift, t_svalue data)
 
 static t_svalue _op_bit_or (t_svalue data1, t_svalue data2)
 {
-    return data1 | data2;
+    return data2 | data1;
 }
 
 static t_svalue _op_bit_xor (t_svalue data1, t_svalue data2)
 {
-    return data1 ^ data2;
+    return data2 ^ data1;
 }
 
 static t_svalue _op_eq (t_svalue data1, t_svalue data2)
 {
-    return data1 == data2;
+    return data2 == data1;
 }
 
 static t_svalue _op_ne (t_svalue data1, t_svalue data2)
 {
-    return data1 != data2;
+    return data2 != data1;
 }
 
 static t_svalue _op_le (t_svalue data1, t_svalue data2)
 {
-    return data1 <= data2;
+    return data2 <= data1;
 }
 
 static t_svalue _op_lt (t_svalue data1, t_svalue data2)
 {
-    return data1 < data2;
+    return data2 < data1;
 }
 
 static t_svalue _op_ge (t_svalue data1, t_svalue data2)
 {
-    return data1 >= data2;
+    return data2 >= data1;
 }
 
 static t_svalue _op_gt (t_svalue data1, t_svalue data2)
 {
-    return data1 > data2;
+    return data2 > data1;
+}
+
+static int _i_strcmp (const char* s1, const char* s2)
+{
+    return ((sim_switches & SWMASK ('I')) ? strcasecmp (s2, s1) : strcmp (s2, s1));
 }
 
 static t_svalue _op_str_eq (const char* str1, const char* str2)
 {
-    return (0 == strcmp (str1, str2));
+    return (0 == _i_strcmp (str2, str1));
 }
 
 static t_svalue _op_str_ne (const char* str1, const char* str2)
 {
-    return (0 != strcmp (str1, str2));
+    return (0 != _i_strcmp (str2, str1));
 }
 
 static t_svalue _op_str_le (const char* str1, const char* str2)
 {
-    return (0 > strcmp (str1, str2));
+    return (0 <= _i_strcmp (str2, str1));
 }
 
 static t_svalue _op_str_lt (const char* str1, const char* str2)
 {
-    return (0 >= strcmp (str1, str2));
+    return (0 < _i_strcmp (str2, str1));
 }
 
 static t_svalue _op_str_ge (const char* str1, const char* str2)
 {
-    return (0 < strcmp (str1, str2));
+    return (0 >= _i_strcmp (str2, str1));
 }
 
 static t_svalue _op_str_gt (const char* str1, const char* str2)
 {
-    return (0 <= strcmp (str1, str2));
+    return (0 > _i_strcmp (str2, str1));
 }
 
 /*
@@ -14088,8 +14201,9 @@ static const char* sim_into_postfix (Stack* stack1, const char* cptr, t_stat* st
 static t_bool _value_of (const char* data, t_svalue* svalue, char* string, size_t string_size)
 {
     CONST char* gptr;
+    size_t data_size = strlen (data);
 
-    if (isalpha (*data)) {
+    if (isalpha (*data) || (*data == '_')) {
         REG* rptr = NULL;
         DEVICE* dptr = sim_dfdev;
         const char* dot;
@@ -14110,24 +14224,31 @@ static t_bool _value_of (const char* data, t_svalue* svalue, char* string, size_
             rptr = find_reg_glob (data, &gptr, &dptr);
         if (rptr) {
             *svalue = (t_svalue) get_rval (rptr, 0);
-            sprint_val (string + 1, *svalue, 10, string_size - 2, PV_LEFTSIGN);
-            *string = '"';
-            strlcpy (&string[strlen (string)], "\"", string_size - strlen (string));
+            sprint_val (string, *svalue, 10, string_size - 1, PV_LEFTSIGN);
             return TRUE;
         }
-        gptr = _sim_get_env_special (data, string + 1, string_size - 2);
+        gptr = _sim_get_env_special (data, string, string_size - 1);
         if (gptr) {
-            *svalue = strtotsv (string + 1, &gptr, 0);
-            *string = '"';
-            strlcpy (&string[strlen (string)], "\"", string_size - strlen (string));
-            return (*gptr == '\0');
+            *svalue = strtotsv (string, &gptr, 0);
+            return ((*gptr == '\0') && (*string));
         }
-        else
+        else {
             data = "";
+            data_size = 0;
+        }
     }
-    *svalue = strtotsv (data, &gptr, 0);
-    snprintf (string, string_size - 1, "\"%s\"", data);
-    return (*gptr == '\0');
+    string[0] = '\0';
+    if ((data[0] == '\'') && (data_size > 1) && (data[data_size - 1] == '\''))
+        snprintf (string, string_size - 1, "\"%*.*s\"", (int) (data_size - 2), (int) (data_size - 2), data + 1);
+    if ((data[0] == '"') && (data_size > 1) && (data[data_size - 1] == '"'))
+        strlcpy (string, data, string_size);
+    if (string[0] == '\0') {
+        *svalue = strtotsv (data, &gptr, 0);
+        return ((*gptr == '\0') && (*data));
+    }
+    sim_sub_args (string, string_size, sim_exp_argv);
+    *svalue = strtotsv (string, &gptr, 0);
+    return ((*gptr == '\0') && (*string));
 }
 
 /*

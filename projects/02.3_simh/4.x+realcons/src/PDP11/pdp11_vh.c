@@ -1025,288 +1025,295 @@ fprintf (stderr, "\rtqln %d\n", 64 - tmxr_tqln (lp->tmln));
     return (SCPE_OK);
 }
 
-static t_stat vh_wr (   int32   ldata,
-                        int32   PA,
-                        int32   access  )
+static t_stat vh_wr (int32   ldata,
+    int32   PA,
+    int32   access)
 {
     int32   vh = ((PA - vh_dib.ba) >> 4), line;
-    TMLX    *lp;
-    uint16  data = (uint16)ldata;
+    TMLX* lp;
+    uint16  data = (uint16) ldata;
     static BITFIELD* bitdefs[] = {vh_csr_bits, vh_rbuf_bits, vh_lpr_bits, vh_stat_bits,
                                   vh_lnctrl_bits, vh_tbuffad1_bits, vh_tbuffad1_bits, vh_tbuffct_bits};
 
     if (vh > VH_MAXMUX)                         /* validate mux number */
         return SCPE_IERR;
 
-    sim_debug(DBG_WREG, &vh_dev, "vh_wr(vh=%d, PA=0x%08X [%s], access=%d, data=0x%X) ", vh, PA, 
-              ((vh_unit[vh].flags & UNIT_MODEDHU) ? vh_wr_dhu_regs : vh_wr_dhv_regs)[(PA >> 1) & 07], access, data);
-    sim_debug_bits(DBG_WREG, &vh_dev, bitdefs[(PA >> 1) & 07], (uint32)((PA & 1) ? data<<8 : data), (uint32)((PA & 1) ? data<<8 : data), TRUE);
+    sim_debug (DBG_WREG, &vh_dev, "vh_wr(vh=%d, PA=0x%08X [%s], access=%d, data=0x%X) ", vh, PA,
+        ((vh_unit[vh].flags & UNIT_MODEDHU) ? vh_wr_dhu_regs : vh_wr_dhv_regs)[(PA >> 1) & 07], access, data);
+    sim_debug_bits (DBG_WREG, &vh_dev, bitdefs[(PA >> 1) & 07], (uint32) ((PA & 1) ? data << 8 : data), (uint32) ((PA & 1) ? data << 8 : data), TRUE);
 
-    switch ((PA >> 1) & 7) {   
-    case 0:     /* CSR, but no read-modify-write */
-        if (access == WRITEB)
-            data = (PA & 1) ?
-                (vh_csr[vh] & 0377) | (data << 8) :
-                (vh_csr[vh] & ~0377) | (data & 0377);
-        if (data & CSR_MASTER_RESET) {
-            if ((vh_unit[vh].flags & UNIT_MODEDHU) && (data & CSR_SKIP))
-                data &= ~CSR_MASTER_RESET;
-            if (vh == 0) /* Only start unit service on the first unit.  Units are polled there */
-                sim_clock_coschedule (vh_poll_unit, tmxr_poll);
-            vh_mcount[vh] = MS2SIMH (1200); /* 1.2 seconds */
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
-            sim_debug (DBG_TIM, &vh_dev, "vh_wr() - Master Reset Timeout set vh=%d, timeout=%d\n", vh, vh_mcount[vh]); 
-        }
-        if ((data & CSR_RXIE) == 0)
-            vh_clr_rxint (vh);
-        /* catch the RXIE transition if the FIFO is not empty */
-        else if (((vh_csr[vh] & CSR_RXIE) == 0) &&
-              (rbuf_idx[vh] != 0)) {
-            if (vh_unit[vh].flags & UNIT_MODEDHU) {
-                if (rbuf_idx[vh] > FIFO_ALARM)
-                    vh_set_rxint (vh);
-                else if (vh_timer[vh] == 0)
-                    ;
-                else if (vh_timer[vh] == 1)
-                    vh_set_rxint (vh);
-                else if (vh_timeo[vh] == 0) {
-                    vh_timeo[vh] = MS2SIMH (vh_timer[vh]) + 1;
-                    sim_debug (DBG_TIM, &vh_dev, "vh_wr() - Timeout set vh=%d, timeout=%d\n", vh, vh_timeo[vh]); 
-                    }
-            } else {
-                vh_set_rxint (vh);
-            }
-        }
-        if ((data & CSR_TXIE) == 0)
-            vh_clr_txint (vh);
-        else if (((vh_csr[vh] & CSR_TXIE) == 0) &&
-              (txq_idx[vh] != 0))
-            vh_set_txint (vh);
-        vh_csr[vh] = (vh_csr[vh] & ~((uint16) CSR_RW)) | (data & (uint16) CSR_RW);
-        break;
-    case 1:     /* TXCHAR/RXTIMER */
-        if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
-            break;
-        if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
-            vh_mcount[vh] = 1;
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
-            break;
-        }
-        if (vh_unit[vh].flags & UNIT_MODEDHU) {
-            if (CSR_GETCHAN (vh_csr[vh]) != 0)
-                break;
+    switch ((PA >> 1) & 7) {
+        case 0:     /* CSR, but no read-modify-write */
             if (access == WRITEB)
                 data = (PA & 1) ?
+                (vh_csr[vh] & 0377) | (data << 8) :
+                (vh_csr[vh] & ~0377) | (data & 0377);
+            if (data & CSR_MASTER_RESET) {
+                if ((vh_unit[vh].flags & UNIT_MODEDHU) && (data & CSR_SKIP))
+                    data &= ~CSR_MASTER_RESET;
+                if (vh == 0) /* Only start unit service on the first unit.  Units are polled there */
+                    sim_clock_coschedule (vh_poll_unit, tmxr_poll);
+                vh_mcount[vh] = MS2SIMH (1200); /* 1.2 seconds */
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+                sim_debug (DBG_TIM, &vh_dev, "vh_wr() - Master Reset Timeout set vh=%d, timeout=%d\n", vh, vh_mcount[vh]);
+            }
+            if ((data & CSR_RXIE) == 0)
+                vh_clr_rxint (vh);
+            /* catch the RXIE transition if the FIFO is not empty */
+            else if (((vh_csr[vh] & CSR_RXIE) == 0) &&
+                (rbuf_idx[vh] != 0)) {
+                if (vh_unit[vh].flags & UNIT_MODEDHU) {
+                    if (rbuf_idx[vh] > FIFO_ALARM)
+                        vh_set_rxint (vh);
+                    else if (vh_timer[vh] == 0)
+                        ;
+                    else if (vh_timer[vh] == 1)
+                        vh_set_rxint (vh);
+                    else if (vh_timeo[vh] == 0) {
+                        vh_timeo[vh] = MS2SIMH (vh_timer[vh]) + 1;
+                        sim_debug (DBG_TIM, &vh_dev, "vh_wr() - Timeout set vh=%d, timeout=%d\n", vh, vh_timeo[vh]);
+                    }
+                }
+                else {
+                    vh_set_rxint (vh);
+                }
+            }
+            if ((data & CSR_TXIE) == 0)
+                vh_clr_txint (vh);
+            else if (((vh_csr[vh] & CSR_TXIE) == 0) &&
+                (txq_idx[vh] != 0))
+                vh_set_txint (vh);
+            vh_csr[vh] = (vh_csr[vh] & ~((uint16) CSR_RW)) | (data & (uint16) CSR_RW);
+            break;
+        case 1:     /* TXCHAR/RXTIMER */
+            if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
+                break;
+            if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
+                vh_mcount[vh] = 1;
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+                break;
+            }
+            if (vh_unit[vh].flags & UNIT_MODEDHU) {
+                if (CSR_GETCHAN (vh_csr[vh]) != 0)
+                    break;
+                if (access == WRITEB)
+                    data = (PA & 1) ?
                     (vh_timer[vh] & 0377) | (data << 8) :
                     (vh_timer[vh] & ~0377) | (data & 0377);
-            vh_timer[vh] = data & 0377;
+                vh_timer[vh] = data & 0377;
 #if 0
-            if (vh_csr[vh] & CSR_RXIE) {
-                if (rbuf_idx[vh] > FIFO_ALARM)
-                    vh_set_rxint (vh);
-                else if (vh_timer[vh] == 0)
-                    ;
-                else if (vh_timer[vh] == 1)
-                    vh_set_rxint (vh);
-                else if (vh_timeo[vh] == 0)
-                    vh_timeo[vh] = MS2SIMH (vh_timer[vh]) + 1;
-            }
+                if (vh_csr[vh] & CSR_RXIE) {
+                    if (rbuf_idx[vh] > FIFO_ALARM)
+                        vh_set_rxint (vh);
+                    else if (vh_timer[vh] == 0)
+                        ;
+                    else if (vh_timer[vh] == 1)
+                        vh_set_rxint (vh);
+                    else if (vh_timeo[vh] == 0)
+                        vh_timeo[vh] = MS2SIMH (vh_timer[vh]) + 1;
+                }
 #endif
-        } else {
+            }
+            else {
+                line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
+                lp = &vh_parm[line];
+                if (access == WRITEB)
+                    data = (PA & 1) ?
+                    (lp->txchar & 0377) | (data << 8) :
+                    (lp->txchar & ~0377) | (data & 0377);
+                lp->txchar = data;  /* TXCHAR */
+                if (lp->txchar & TXCHAR_TX_DATA_VALID) {
+                    if (lp->tbuf2 & TB2_TX_ENA) {
+                        if (vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]),
+                            lp->txchar) != SCPE_STALL) {
+                            q_tx_report (vh, CSR_GETCHAN (vh_csr[vh]) << CSR_V_TX_LINE);
+                            lp->txchar &= ~TXCHAR_TX_DATA_VALID;
+                        }
+                        else
+                            sim_activate_after_abs (vh_unit, lp->tmln->txdeltausecs);
+                    }
+                }
+            }
+            break;
+        case 2:     /* LPR */
+            if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
+                vh_mcount[vh] = 1;
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+                break;
+            }
+            if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
+                break;
             line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
             lp = &vh_parm[line];
             if (access == WRITEB)
-                data = (PA & 1) ?   
-                    (lp->txchar & 0377) | (data << 8) :
-                    (lp->txchar & ~0377) | (data & 0377);
-            lp->txchar = data;  /* TXCHAR */
-            if (lp->txchar & TXCHAR_TX_DATA_VALID) {
-                if (lp->tbuf2 & TB2_TX_ENA)
-                    vh_putc (vh, lp,
-                        CSR_GETCHAN (vh_csr[vh]),
-                        lp->txchar);
-                q_tx_report (vh,
-                    CSR_GETCHAN (vh_csr[vh]) << CSR_V_TX_LINE);
-                lp->txchar &= ~TXCHAR_TX_DATA_VALID;
-            }
-        }
-        break;
-    case 2:     /* LPR */
-        if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
-            vh_mcount[vh] = 1;
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
-            break;
-        }
-        if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
-            break;
-        line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
-        lp = &vh_parm[line];
-        if (access == WRITEB)
-            data = (PA & 1) ?
+                data = (PA & 1) ?
                 (lp->lpr & 0377) | (data << 8) :
                 (lp->lpr & ~0377) | (data & 0377);
-        /* Modify only if CSR<3:0> == 0 */
-        if (CSR_GETCHAN (vh_csr[vh]) != 0)
-            data &= ~LPR_DISAB_XRPT;
-        lp->lpr = data;
-        vh_set_config (lp);
-        if (((lp->lpr >> LPR_V_DIAG) & LPR_M_DIAG) == 1) {
-            fifo_put (vh, lp,
-                RBUF_DIAG |
-                RBUF_PUTLINE (CSR_GETCHAN (vh_csr[vh])) |
-                BMP_OK);
-            /* BUG: check for overflow above */
-            lp->lpr &= ~(LPR_M_DIAG << LPR_V_DIAG);
-        }
-        break;
-    case 3:     /* STAT/FIFODATA */
-        if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
-            vh_mcount[vh] = 1;
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+            /* Modify only if CSR<3:0> == 0 */
+            if (CSR_GETCHAN (vh_csr[vh]) != 0)
+                data &= ~LPR_DISAB_XRPT;
+            lp->lpr = data;
+            vh_set_config (lp);
+            if (((lp->lpr >> LPR_V_DIAG) & LPR_M_DIAG) == 1) {
+                fifo_put (vh, lp,
+                    RBUF_DIAG |
+                    RBUF_PUTLINE (CSR_GETCHAN (vh_csr[vh])) |
+                    BMP_OK);
+                /* BUG: check for overflow above */
+                lp->lpr &= ~(LPR_M_DIAG << LPR_V_DIAG);
+            }
             break;
-        }
-        if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
-            break;
-        line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
-        lp = &vh_parm[line];
-        if (vh_unit[vh].flags & UNIT_MODEDHU) {
-            /* high byte writes not allowed */
-            if (PA & 1)
+        case 3:     /* STAT/FIFODATA */
+            if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
+                vh_mcount[vh] = 1;
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
                 break;
-            /* transmit 1 or 2 characters */
-            if (!(lp->tbuf2 & TB2_TX_ENA))
+            }
+            if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
                 break;
-            vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), data);
-            q_tx_report (vh, CSR_GETCHAN (vh_csr[vh]) << CSR_V_TX_LINE);
-            if (access != WRITEB)
-                vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]),
+            line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
+            lp = &vh_parm[line];
+            if (vh_unit[vh].flags & UNIT_MODEDHU) {
+                /* high byte writes not allowed */
+                if (PA & 1)
+                    break;
+                /* transmit 1 or 2 characters */
+                if (!(lp->tbuf2 & TB2_TX_ENA))
+                    break;
+                vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), data);
+                q_tx_report (vh, CSR_GETCHAN (vh_csr[vh]) << CSR_V_TX_LINE);
+                if (access != WRITEB)
+                    vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]),
                     data >> 8);
-        }
-        break;
-    case 4:     /* LNCTRL */
-        if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
-            vh_mcount[vh] = 1;
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+            }
             break;
-        }
-        if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)   
-            break;
-        line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
-        lp = &vh_parm[line];
-        if (access == WRITEB)
-            data = (PA & 1) ?
+        case 4:     /* LNCTRL */
+            if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
+                vh_mcount[vh] = 1;
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+                break;
+            }
+            if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
+                break;
+            line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
+            lp = &vh_parm[line];
+            if (access == WRITEB)
+                data = (PA & 1) ?
                 (lp->lnctrl & 0377) | (data << 8) :
                 (lp->lnctrl & ~0377) | (data & 0377);
-        /* catch the abort TX transition */
-        if (!(lp->lnctrl & LNCTRL_TX_ABORT) &&
-             (data & LNCTRL_TX_ABORT)) {
-            if ((lp->tbuf2 & TB2_TX_ENA) &&
-                (lp->tbuf2 & TB2_TX_DMA_START)) {
-                lp->tbuf2 &= ~TB2_TX_DMA_START;
-                q_tx_report (vh, CSR_GETCHAN (vh_csr[vh]) << CSR_V_TX_LINE);
-            }
-        }
-        /* Implement program-initiated flow control */
-        if ( (data & LNCTRL_FORCE_XOFF) &&
-             !(lp->lnctrl & LNCTRL_FORCE_XOFF) ) {
-            if (!(lp->lnctrl & LNCTRL_IAUTO))
-                vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XOFF);
-        } else if ( !(data & LNCTRL_FORCE_XOFF) &&
-                (lp->lnctrl & LNCTRL_FORCE_XOFF) ) {
-            if (!(lp->lnctrl & LNCTRL_IAUTO))
-                vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XON);
-            else if (!(vh_crit & (1 << vh)) &&
-                 (vh_stall[vh] & (1 << CSR_GETCHAN (vh_csr[vh]))))
-                vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XON);
-        }
-        if ( (data & LNCTRL_IAUTO) &&       /* IAUTO 0->1 */
-             !(lp->lnctrl & LNCTRL_IAUTO) ) {
-            if (!(lp->lnctrl & LNCTRL_FORCE_XOFF)) {
-                if (vh_crit & (1 << vh)) {
-                    vh_putc (vh, lp,
-                        CSR_GETCHAN (vh_csr[vh]), XOFF);
-                    vh_stall[vh] |= (1 << CSR_GETCHAN (vh_csr[vh]));
+            /* catch the abort TX transition */
+            if (!(lp->lnctrl & LNCTRL_TX_ABORT) &&
+                (data & LNCTRL_TX_ABORT)) {
+                if ((lp->tbuf2 & TB2_TX_ENA) &&
+                    (lp->tbuf2 & TB2_TX_DMA_START)) {
+                    lp->tbuf2 &= ~TB2_TX_DMA_START;
+                    q_tx_report (vh, CSR_GETCHAN (vh_csr[vh]) << CSR_V_TX_LINE);
                 }
-            } else {
-                /* vh_stall[vh] |= (1 << CSR_GETCHAN (vh_csr[vh])) */;
             }
-        } else if ( !(data & LNCTRL_IAUTO) &&
-                (lp->lnctrl & LNCTRL_IAUTO) ) {
-            if (!(lp->lnctrl & LNCTRL_FORCE_XOFF))
-                vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XON);
-        }
-        /* check modem control bits */
-        if ( !(data & LNCTRL_DTR) &&    /* DTR 1->0 */
-              (lp->lnctrl & LNCTRL_DTR)) {
-            if ((lp->tmln->conn) && (vh_unit[vh].flags & UNIT_HANGUP)) {
-                tmxr_linemsg (lp->tmln, "\r\nLine hangup\r\n");
-                tmxr_reset_ln (lp->tmln);
+            /* Implement program-initiated flow control */
+            if ((data & LNCTRL_FORCE_XOFF) &&
+                !(lp->lnctrl & LNCTRL_FORCE_XOFF)) {
+                if (!(lp->lnctrl & LNCTRL_IAUTO))
+                    vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XOFF);
             }
-            HangupModem (vh, lp, CSR_GETCHAN (vh_csr[vh]));
-        }
-        lp->lnctrl = data;
-        lp->tmln->rcve = (data & LNCTRL_RX_ENA) ? 1 : 0;
-        tmxr_poll_rx (&vh_desc);
-        vh_getc (vh);
-        if (lp->lnctrl & LNCTRL_BREAK)
-            vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), 0);
-        break;
-    case 5:     /* TBUFFAD1 */
-        if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
-            vh_mcount[vh] = 1;
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+            else if (!(data & LNCTRL_FORCE_XOFF) &&
+                (lp->lnctrl & LNCTRL_FORCE_XOFF)) {
+                if (!(lp->lnctrl & LNCTRL_IAUTO))
+                    vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XON);
+                else if (!(vh_crit & (1 << vh)) &&
+                    (vh_stall[vh] & (1 << CSR_GETCHAN (vh_csr[vh]))))
+                    vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XON);
+            }
+            if ((data & LNCTRL_IAUTO) &&       /* IAUTO 0->1 */
+                !(lp->lnctrl & LNCTRL_IAUTO)) {
+                if (!(lp->lnctrl & LNCTRL_FORCE_XOFF)) {
+                    if (vh_crit & (1 << vh)) {
+                        vh_putc (vh, lp,
+                            CSR_GETCHAN (vh_csr[vh]), XOFF);
+                        vh_stall[vh] |= (1 << CSR_GETCHAN (vh_csr[vh]));
+                    }
+                }
+                else {
+                    /* vh_stall[vh] |= (1 << CSR_GETCHAN (vh_csr[vh])) */;
+                }
+            }
+            else if (!(data & LNCTRL_IAUTO) &&
+                (lp->lnctrl & LNCTRL_IAUTO)) {
+                if (!(lp->lnctrl & LNCTRL_FORCE_XOFF))
+                    vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), XON);
+            }
+            /* check modem control bits */
+            if (!(data & LNCTRL_DTR) &&    /* DTR 1->0 */
+                (lp->lnctrl & LNCTRL_DTR)) {
+                if ((lp->tmln->conn) && (vh_unit[vh].flags & UNIT_HANGUP)) {
+                    tmxr_linemsg (lp->tmln, "\r\nLine hangup\r\n");
+                    tmxr_reset_ln (lp->tmln);
+                }
+                HangupModem (vh, lp, CSR_GETCHAN (vh_csr[vh]));
+            }
+            lp->lnctrl = data;
+            lp->tmln->rcve = (data & LNCTRL_RX_ENA) ? 1 : 0;
+            tmxr_poll_rx (&vh_desc);
+            vh_getc (vh);
+            if (lp->lnctrl & LNCTRL_BREAK)
+                vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]), 0);
             break;
-        }
-        if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)   
-            break;
-        line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
-        lp = &vh_parm[line];
-        if (access == WRITEB)
-            data = (PA & 1) ?
+        case 5:     /* TBUFFAD1 */
+            if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
+                vh_mcount[vh] = 1;
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+                break;
+            }
+            if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
+                break;
+            line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
+            lp = &vh_parm[line];
+            if (access == WRITEB)
+                data = (PA & 1) ?
                 (lp->tbuf1 & 0377) | (data << 8) :
                 (lp->tbuf1 & ~0377) | (data & 0377);
-        lp->tbuf1 = data;
-        break;
-    case 6:     /* TBUFFAD2 */
-        if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
-            vh_mcount[vh] = 1;
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+            lp->tbuf1 = data;
             break;
-        }
-        if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
-            break;
-        line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
-        lp = &vh_parm[line];
-        if (access == WRITEB)
-            data = (PA & 1) ?
+        case 6:     /* TBUFFAD2 */
+            if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
+                vh_mcount[vh] = 1;
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+                break;
+            }
+            if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
+                break;
+            line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
+            lp = &vh_parm[line];
+            if (access == WRITEB)
+                data = (PA & 1) ?
                 (lp->tbuf2 & 0377) | (data << 8) :
                 (lp->tbuf2 & ~0377) | (data & 0377);
-        lp->tbuf2 = data;
-        /* if starting a DMA, clear DMA_ERR */
-        if (vh_unit[vh].flags & UNIT_FASTDMA) {
-            doDMA (vh, CSR_GETCHAN (vh_csr[vh]));
-            tmxr_send_buffered_data (lp->tmln);
-        }
-        break;
-    case 7:     /* TBUFFCT */
-        if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
-            vh_mcount[vh] = 1;
-            sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+            lp->tbuf2 = data;
+            /* if starting a DMA, clear DMA_ERR */
+            if (vh_unit[vh].flags & UNIT_FASTDMA) {
+                doDMA (vh, CSR_GETCHAN (vh_csr[vh]));
+                tmxr_send_buffered_data (lp->tmln);
+            }
             break;
-        }
-        if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
-            break;
-        line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
-        lp = &vh_parm[line];
-        if (access == WRITEB)
-            data = (PA & 1) ?
+        case 7:     /* TBUFFCT */
+            if ((data == RESET_ABORT) && (vh_csr[vh] & CSR_MASTER_RESET)) {
+                vh_mcount[vh] = 1;
+                sim_clock_coschedule (vh_timer_unit, tmxr_poll);
+                break;
+            }
+            if (CSR_GETCHAN (vh_csr[vh]) >= VH_LINES)
+                break;
+            line = (vh * VH_LINES) + CSR_GETCHAN (vh_csr[vh]);
+            lp = &vh_parm[line];
+            if (access == WRITEB)
+                data = (PA & 1) ?
                 (lp->tbuffct & 0377) | (data << 8) :
                 (lp->tbuffct & ~0377) | (data & 0377);
-        lp->tbuffct = data;
-        break;
-    default:
-        /* can't happen */
-        break;
+            lp->tbuffct = data;
+            break;
+        default:
+            /* can't happen */
+            break;
     }
     return (SCPE_OK);
 }
@@ -1383,16 +1390,16 @@ static t_stat vh_timersvc (  UNIT    *uptr   )
     return (SCPE_OK);
 }
 
-static t_stat vh_svc (  UNIT    *uptr   )
+static t_stat vh_svc (UNIT* uptr)
 {
     int32   vh, newln, i;
 
-    sim_debug(DBG_TRC, find_dev_from_unit(uptr), "vh_svc()\n");
+    sim_debug (DBG_TRC, find_dev_from_unit (uptr), "vh_svc()\n");
 
     /* sample every 10ms for modem changes (new connections) */
     newln = tmxr_poll_conn (&vh_desc);
     if (newln >= 0) {
-        TMLX    *lp;
+        TMLX* lp;
         int32   line;
         vh = newln / VH_LINES;  /* determine which mux */
         line = newln - (vh * VH_LINES);
@@ -1402,18 +1409,34 @@ static t_stat vh_svc (  UNIT    *uptr   )
             lp->lstat |= STAT_RI;
         if (lp->lnctrl & LNCTRL_LINK_TYPE)
             fifo_put (vh, lp, RBUF_DIAG |
-                      RBUF_PUTLINE (line) |
-                      ((lp->lstat >> 8) & 0376));
-            /* BUG: should check for overflow above */
+            RBUF_PUTLINE (line) |
+            ((lp->lstat >> 8) & 0376));
+        /* BUG: should check for overflow above */
     }
-    /* scan all muxes, lines for DMA to complete; start every 3.12ms */
-    for (vh = 0; vh < vh_desc.lines/VH_LINES; vh++) {
-        for (i = 0; i < VH_LINES; i++)
+    /* scan all muxes lines */
+    for (vh = 0; vh < vh_desc.lines / VH_LINES; vh++) {
+        for (i = 0; i < VH_LINES; i++) {
+            int32   line = (vh * VH_LINES) + i;
+            TMLX* lp = &vh_parm[line];
+
+            /* process any pending programmed output */
+            if (lp->txchar & TXCHAR_TX_DATA_VALID) {
+                if (lp->tbuf2 & TB2_TX_ENA) {
+                    if (vh_putc (vh, lp, CSR_GETCHAN (vh_csr[vh]),
+                        lp->txchar) != SCPE_STALL) {
+                        q_tx_report (vh,
+                            CSR_GETCHAN (vh_csr[vh]) << CSR_V_TX_LINE);
+                        lp->txchar &= ~TXCHAR_TX_DATA_VALID;
+                    }
+                }
+            }
+            /* process pending DMA */
             doDMA (vh, i);
+        }
     }
     /* interrupt driven in a real DHQ */
     tmxr_poll_rx (&vh_desc);
-    for (vh = 0; vh < vh_desc.lines/VH_LINES; vh++)
+    for (vh = 0; vh < vh_desc.lines / VH_LINES; vh++)
         vh_getc (vh);
     tmxr_poll_tx (&vh_desc);
     sim_clock_coschedule (uptr, tmxr_poll); /* requeue ourselves */
