@@ -148,18 +148,20 @@ extern int32 MMR2;
 #define RQ_SVER         3                               /* software version */
 #define RQ_DHTMO        60                              /* def host timeout */
 #define RQ_DCTMO        120                             /* def ctrl timeout */
-#define RQ_NUMDR        4                               /* # drives */
+#define RQ_NUMDR        4                               /* def # drives */
+#define RQ_MAXDR        254                             /* max # drives */
 #define RQ_NUMBY        512                             /* bytes per block */
 #define RQ_MAXFR        (1 << 16)                       /* max xfer */
 #define RQ_MAPXFER      (1u << 31)                      /* mapped xfer */
 #define RQ_M_PFN        0x1FFFFF                        /* map entry PFN */
 
 #define UNIT_V_ONL      (DKUF_V_UF + 0)                 /* online */
-#define UNIT_V_WLK      (DKUF_V_UF + 1)                 /* hwre write lock */
-#define UNIT_V_ATP      (DKUF_V_UF + 2)                 /* attn pending */
-#define UNIT_V_DTYPE    (DKUF_V_UF + 3)                 /* drive type */
-#define UNIT_M_DTYPE    0x1F
-#define UNIT_V_NOAUTO   (DKUF_V_UF + 8)                 /* noautosize */
+#define UNIT_V_WLK      DKUF_V_WLK                      /* hwre write lock */
+#define UNIT_V_ATP      (UNIT_V_ONL + 1)                /* attn pending */
+#define UNIT_V_DTYPE    (UNIT_V_ATP + 1)                /* drive type */
+#define UNIT_W_DTYPE    5                               /* 5b drive type encode */
+#define UNIT_M_DTYPE    ((1u << UNIT_W_DTYPE) - 1)
+#define UNIT_V_NOAUTO   (UNIT_V_DTYPE + UNIT_W_DTYPE)   /* noautosize */
 #define UNIT_ONL        (1 << UNIT_V_ONL)
 #define UNIT_WLK        (1 << UNIT_V_WLK)
 #define UNIT_ATP        (1 << UNIT_V_ATP)
@@ -193,8 +195,8 @@ extern int32 MMR2;
 #define ERR             0                               /* must be SCPE_OK! */
 #define OK              1
 
-#define RQ_TIMER        (RQ_NUMDR)
-#define RQ_QUEUE        (RQ_TIMER + 1)
+#define RQ_TIMER        (RQ_MAXDR)
+#define RQ_QUEUE        (RQ_MAXDR + 1)
 
 /* Internal packet management.  The real RQDX3 manages its packets as true
    linked lists.  However, use of actual addresses in structures won't work
@@ -694,7 +696,6 @@ struct drvtyp {
     int32       rbn;                                    /* RBNs */
     uint16      mod;                                    /* MSCP model */
     int32       MediaId;                                /* MSCP media */
-    int32       med;                                    /* MSCP media */
     int32       flgs;                                   /* flags */
     const char  *name;                                  /* name */
     };
@@ -706,7 +707,7 @@ MediaId
 Is defined in the MSCP Basic Disk Functions Manual, page 4-37 to 4-38:
 
 The media type identifier is a 32-bit number, and it's coded like this:
-The high 25 bits are 5 characters, each coded with 5 bits. The low 7
+The high 25 bits are 5 characters, each coded with 5 bits. The low 7 
 bits is a binary coded 2 digits.
 
 Looking at it, you have:
@@ -714,12 +715,12 @@ D0,D1,A0,A1,A2,N
 
 For an RA81, it would be:
 
-D0,D1 is the preferred device type name for the unit. In our case,
+D0,D1 is the preferred device type name for the unit. In our case, 
 that would be "DU".
 A0,A1,A2 is the name of the media used on the unit. In our case "RA".
 N is the value of the two decimal digits, so 81 for this example.
 
-And for letters, the coding is that A=1, B=2 and so on. 0 means the
+And for letters, the coding is that A=1, B=2 and so on. 0 means the 
 character is not used.
 
 So, again, for an RA81, we would get:
@@ -766,6 +767,35 @@ static struct drvtyp drv_tab[] = {
     { 0 }
     };
 
+#undef RQ_DRV
+#define RQ_DRV(d) #d
+
+static const char *drv_types[] = {
+    RQ_DRV (RX50),
+    RQ_DRV (RX33),
+    RQ_DRV (RD51),
+    RQ_DRV (RD31),
+    RQ_DRV (RD52),
+    RQ_DRV (RD53),
+    RQ_DRV (RD54),
+    RQ_DRV (RA82),
+    RQ_DRV (RRD40),
+    RQ_DRV (RA72),
+    RQ_DRV (RA90),
+    RQ_DRV (RA92),
+    RQ_DRV (RA8U),
+    RQ_DRV (RA60),
+    RQ_DRV (RA81),
+    RQ_DRV (RA71),
+    RQ_DRV (RD32),
+    RQ_DRV (RC25),
+    RQ_DRV (RCF25),
+    RQ_DRV (RA80),
+    RQ_DRV (RA70),
+    RQ_DRV (RA73),
+    NULL
+    };
+
 struct ctlrtyp {
     uint32      uqpm;                                   /* port model */
     uint16      model;                                  /* controller model */
@@ -794,7 +824,6 @@ int32 rq_xtime = RQ_XTIME;                              /* transfer time */
 
 typedef struct {
     uint32              cnum;                           /* ctrl number */
-    uint16              ubase;                          /* unit base */
     uint32              sa;                             /* status, addr */
     uint32              saw;                            /* written data */
     uint32              s1dat;                          /* S1 data */
@@ -815,6 +844,7 @@ typedef struct {
     struct uq_ring      cq;                             /* cmd ring */
     struct uq_ring      rq;                             /* rsp ring */
     struct rqpkt        pak[RQ_NPKTS];                  /* packet queue */
+    uint16              max_plug;                       /* highest unit plug number */
     } MSC;
 
 /* debugging bitmaps */
@@ -878,10 +908,11 @@ t_stat rq_boot (int32 unitno, DEVICE *dptr);
 t_stat rq_set_wlk (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
 t_stat rq_set_type (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
 t_stat rq_set_ctype (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
+t_stat rq_set_plug (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
+t_stat rq_show_plug (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
+t_stat rq_set_drives (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
 t_stat rq_show_type (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
 t_stat rq_show_ctype (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
-t_stat rq_set_plug (UNIT* uptr, int32 val, CONST char* cptr, void* desc);
-t_stat rq_show_plug (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat rq_show_wlk (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
 t_stat rq_show_ctrl (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
 t_stat rq_show_unitq (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
@@ -947,7 +978,7 @@ DIB rq_dib = {
     1, IVCL (RQ), 0, { &rq_inta }, IOLN_RQ
     };
 
-UNIT rq_unit[] = {
+UNIT rq_unit[RQ_MAXDR + 2] = {
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
@@ -956,8 +987,6 @@ UNIT rq_unit[] = {
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RX50_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RX50)) },
-    { UDATA (&rq_tmrsvc, UNIT_IDLE|UNIT_DIS, 0) },
-    { UDATA (&rq_quesvc, UNIT_DIS, 0) }
     };
 
 REG rq_reg[] = {
@@ -967,11 +996,11 @@ REG rq_reg[] = {
     { GRDATAD (COMM,    rq_ctx.comm,    DEV_RDX, 22, 0, "comm region") },
     { GRDATAD (CQIOFF,  rq_ctx.cq.ioff, DEV_RDX, 32, 0, "command queue intr offset") },
     { GRDATAD (CQBA,    rq_ctx.cq.ba,   DEV_RDX, 22, 0, "command queue base address") },
-    { GRDATAD (CQLNT,   rq_ctx.cq.lnt,  DEV_RDX, 32, 2, "command queue length"), REG_NZ },
+    { GRDATAD (CQLNT,   rq_ctx.cq.lnt,  DEV_RDX,  8, 2, "command queue length"), REG_NZ },
     { GRDATAD (CQIDX,   rq_ctx.cq.idx,  DEV_RDX,  8, 2, "command queue index") },
     { GRDATAD (RQIOFF,  rq_ctx.rq.ioff, DEV_RDX, 32, 0, "request queue intr offset") },
     { GRDATAD (RQBA,    rq_ctx.rq.ba,   DEV_RDX, 22, 0, "request queue base address") },
-    { GRDATAD (RQLNT,   rq_ctx.rq.lnt,  DEV_RDX, 32, 2, "request queue length"), REG_NZ },
+    { GRDATAD (RQLNT,   rq_ctx.rq.lnt,  DEV_RDX,  8, 2, "request queue length"), REG_NZ },
     { GRDATAD (RQIDX,   rq_ctx.rq.idx,  DEV_RDX,  8, 2, "request queue index") },
     { DRDATAD (FREE,    rq_ctx.freq,                 5, "head of free packet list") },
     { DRDATAD (RESP,    rq_ctx.rspq,                 5, "head of response packet list") },
@@ -984,7 +1013,7 @@ REG rq_reg[] = {
     { DRDATAD (HTMO,    rq_ctx.htmo,                17, "host timeout value") },
     { FLDATA  (PRGI,    rq_ctx.prgi,                 0), REG_HIDDEN },
     { FLDATA  (PIP,     rq_ctx.pip,                  0), REG_HIDDEN },
-    { FLDATA  (CTYPE,   rq_ctx.ctype,               32), REG_HIDDEN  },
+    { BINRDATA(CTYPE,   rq_ctx.ctype,               32), REG_HIDDEN },
     { DRDATAD (ITIME,   rq_itime,                   24, "init time delay, except stage 4"), PV_LEFT + REG_NZ },
     { DRDATAD (I4TIME,  rq_itime4,                  24, "init stage 4 delay"), PV_LEFT + REG_NZ },
     { DRDATAD (QTIME,   rq_qtime,                   24, "response time for 'immediate' packets"), PV_LEFT + REG_NZ },
@@ -995,7 +1024,7 @@ REG rq_reg[] = {
     { URDATAD (PKTQ,    rq_unit[0].pktq, 10, 5, 0, RQ_NUMDR, 0, "packet queue, units 0 to 3") },
     { URDATAD (UFLG,    rq_unit[0].uf,  DEV_RDX, 16, 0, RQ_NUMDR, 0, "unit flags, units 0 to 3") },
     { URDATA  (CAPAC,   rq_unit[0].capac, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_HRO) },
-    { URDATAD (PLUG,    rq_unit[0].unit_plug, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
+    { URDATAD (PLUG,    rq_unit[0].unit_plug, 10, 32, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
     { GRDATA  (DEVADDR, rq_dib.ba,      DEV_RDX, 32, 0), REG_HRO },
     { GRDATA  (DEVVEC,  rq_dib.vec,     DEV_RDX, 16, 0), REG_HRO },
     { DRDATA  (DEVLBN,  drv_tab[RA8U_DTYPE].lbn, 22), REG_HRO },
@@ -1081,13 +1110,17 @@ MTAB rq_mod[] = {
       &rq_set_type, NULL, NULL, "Set RA80 Disk Type" },
     { MTAB_XTD|MTAB_VUN|MTAB_VALR, RA8U_DTYPE, NULL, "RAUSER=SizeInMB",
       &rq_set_type, NULL, NULL, "Set RAUSER Disk Type and its size" },
+    { MTAB_XTD|MTAB_VUN, RA8U_DTYPE, NULL, "RA8U",
+      &rq_set_type, NULL, NULL, NULL },
     { MTAB_XTD|MTAB_VUN, 0, "TYPE", NULL,
       NULL, &rq_show_type, NULL, "Display device type" },
-    { MTAB_XTD | MTAB_VUN | MTAB_VALR, 0, "UNIT", "UNIT=val (0-65534)",
+    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0, "UNIT", "UNIT=val (0-65534)",
       &rq_set_plug, &rq_show_plug, NULL, "Set/Display Unit plug value" },
-    { UNIT_NOAUTO, UNIT_NOAUTO, "noautosize", "NOAUTOSIZE", NULL, NULL, NULL, "Disables disk autosize on attach" },
-    { UNIT_NOAUTO,           0, "autosize",   "AUTOSIZE",   NULL, NULL, NULL, "Enables disk autosize on attach" },
-    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0, "FORMAT", "FORMAT={SIMH|VHD|RAW}",
+    { MTAB_XTD|MTAB_VDV|MTAB_VALR, 0, NULL, "DRIVES=val (4-254)",
+      &rq_set_drives, NULL, NULL, "Set Number of Drives" },
+    { UNIT_NOAUTO, UNIT_NOAUTO, "noautosize", "NOAUTOSIZE", NULL, NULL, NULL, "Disable disk autosize on attach" },
+    { UNIT_NOAUTO,           0, "autosize",   "AUTOSIZE",   NULL, NULL, NULL, "Enable disk autosize on attach" },
+    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0, "FORMAT", "FORMAT={AUTO|SIMH|VHD|RAW}",
       &sim_disk_set_fmt, &sim_disk_show_fmt, NULL, "Set/Display disk format" },
 #if defined (VM_PDP11)
     { MTAB_XTD|MTAB_VDV|MTAB_VALR, 004, "ADDRESS", "ADDRESS",
@@ -1107,7 +1140,7 @@ MTAB rq_mod[] = {
 
 DEVICE rq_dev = {
     "RQ", rq_unit, rq_reg, rq_mod,
-    RQ_NUMDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
+    RQ_MAXDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
     NULL, NULL, &rq_reset,
     &rq_boot, &rq_attach, &rq_detach,
     &rq_dib, DEV_DISABLE | DEV_UBUS | DEV_QBUS | DEV_DEBUG | DEV_DISK | DEV_SECTORS,
@@ -1130,7 +1163,7 @@ DIB rqb_dib = {
     1, IVCL (RQ), 0, { &rq_inta }, IOLN_RQ
     };
 
-UNIT rqb_unit[] = {
+UNIT rqb_unit[RQ_MAXDR + 2] = {
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
@@ -1139,8 +1172,6 @@ UNIT rqb_unit[] = {
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
-    { UDATA (&rq_tmrsvc, UNIT_IDLE|UNIT_DIS, 0) },
-    { UDATA (&rq_quesvc, UNIT_DIS, 0) }
     };
 
 REG rqb_reg[] = {
@@ -1150,11 +1181,11 @@ REG rqb_reg[] = {
     { GRDATAD (COMM,    rqb_ctx.comm,    DEV_RDX, 22, 0, "comm region") },
     { GRDATAD (CQIOFF,  rqb_ctx.cq.ioff, DEV_RDX, 32, 0, "command queue intr offset") },
     { GRDATAD (CQBA,    rqb_ctx.cq.ba,   DEV_RDX, 22, 0, "command queue base address") },
-    { GRDATAD (CQLNT,   rqb_ctx.cq.lnt,  DEV_RDX, 32, 2, "command queue length"), REG_NZ },
+    { GRDATAD (CQLNT,   rqb_ctx.cq.lnt,  DEV_RDX,  8, 2, "command queue length"), REG_NZ },
     { GRDATAD (CQIDX,   rqb_ctx.cq.idx,  DEV_RDX,  8, 2, "command queue index") },
     { GRDATAD (RQIOFF,  rqb_ctx.rq.ioff, DEV_RDX, 32, 0, "request queue intr offset") },
     { GRDATAD (RQBA,    rqb_ctx.rq.ba,   DEV_RDX, 22, 0, "request queue base address") },
-    { GRDATAD (RQLNT,   rqb_ctx.rq.lnt,  DEV_RDX, 32, 2, "request queue length"), REG_NZ },
+    { GRDATAD (RQLNT,   rqb_ctx.rq.lnt,  DEV_RDX,  8, 2, "request queue length"), REG_NZ },
     { GRDATAD (RQIDX,   rqb_ctx.rq.idx,  DEV_RDX,  8, 2, "request queue index") },
     { DRDATAD (FREE,    rqb_ctx.freq,                 5, "head of free packet list") },
     { DRDATAD (RESP,    rqb_ctx.rspq,                 5, "head of response packet list") },
@@ -1167,14 +1198,14 @@ REG rqb_reg[] = {
     { DRDATAD (HTMO,    rqb_ctx.htmo,                17, "host timeout value") },
     { FLDATA  (PRGI,    rqb_ctx.prgi,                 0), REG_HIDDEN },
     { FLDATA  (PIP,     rqb_ctx.pip,                  0), REG_HIDDEN },
-    { FLDATA  (CTYPE,   rqb_ctx.ctype,               32), REG_HIDDEN  },
+    { BINRDATA(CTYPE,   rqb_ctx.ctype,               32), REG_HIDDEN },
     { BRDATAD (PKTS,    rqb_ctx.pak,     DEV_RDX,    16, sizeof(rq_ctx.pak)/2, "packet buffers, 33W each, 32 entries") },
     { URDATAD (CPKT,    rqb_unit[0].cpkt, 10, 5, 0, RQ_NUMDR, 0, "current packet, units 0 to 3") },
     { URDATAD (UCNUM,   rqb_unit[0].cnum, 10, 5, 0, RQ_NUMDR, 0, "ctrl number, units 0 to 3") },
     { URDATAD (PKTQ,    rqb_unit[0].pktq, 10, 5, 0, RQ_NUMDR, 0, "packet queue, units 0 to 3") },
     { URDATAD (UFLG,    rqb_unit[0].uf,  DEV_RDX, 16, 0, RQ_NUMDR, 0, "unit flags, units 0 to 3") },
     { URDATA  (CAPAC,   rqb_unit[0].capac, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_HRO) },
-    { URDATAD (PLUG,    rqb_unit[0].unit_plug, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
+    { URDATAD (PLUG,    rqb_unit[0].unit_plug, 10, 32, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
     { GRDATA  (DEVADDR, rqb_dib.ba,      DEV_RDX, 32, 0), REG_HRO },
     { GRDATA  (DEVVEC,  rqb_dib.vec,     DEV_RDX, 16, 0), REG_HRO },
     { NULL }
@@ -1182,7 +1213,7 @@ REG rqb_reg[] = {
 
 DEVICE rqb_dev = {
     "RQB", rqb_unit, rqb_reg, rq_mod,
-    RQ_NUMDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
+    RQ_MAXDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
     NULL, NULL, &rq_reset,
     &rq_boot, &rq_attach, &rq_detach,
     &rqb_dib, DEV_DISABLE | DEV_DIS | DEV_UBUS | DEV_QBUS | DEV_DEBUG | DEV_DISK | DEV_SECTORS,
@@ -1205,7 +1236,7 @@ DIB rqc_dib = {
     1, IVCL (RQ), 0, { &rq_inta }, IOLN_RQ
     };
 
-UNIT rqc_unit[] = {
+UNIT rqc_unit[RQ_MAXDR + 2] = {
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
@@ -1214,8 +1245,6 @@ UNIT rqc_unit[] = {
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
-    { UDATA (&rq_tmrsvc, UNIT_IDLE|UNIT_DIS, 0) },
-    { UDATA (&rq_quesvc, UNIT_DIS, 0) }
     };
 
 REG rqc_reg[] = {
@@ -1225,11 +1254,11 @@ REG rqc_reg[] = {
     { GRDATAD (COMM,    rqc_ctx.comm,    DEV_RDX, 22, 0, "comm region") },
     { GRDATAD (CQIOFF,  rqc_ctx.cq.ioff, DEV_RDX, 32, 0, "command queue intr offset") },
     { GRDATAD (CQBA,    rqc_ctx.cq.ba,   DEV_RDX, 22, 0, "command queue base address") },
-    { GRDATAD (CQLNT,   rqc_ctx.cq.lnt,  DEV_RDX, 32, 2, "command queue length"), REG_NZ },
+    { GRDATAD (CQLNT,   rqc_ctx.cq.lnt,  DEV_RDX,  8, 2, "command queue length"), REG_NZ },
     { GRDATAD (CQIDX,   rqc_ctx.cq.idx,  DEV_RDX,  8, 2, "command queue index") },
     { GRDATAD (RQIOFF,  rqc_ctx.rq.ioff, DEV_RDX, 32, 0, "request queue intr offset") },
     { GRDATAD (RQBA,    rqc_ctx.rq.ba,   DEV_RDX, 22, 0, "request queue base address") },
-    { GRDATAD (RQLNT,   rqc_ctx.rq.lnt,  DEV_RDX, 32, 2, "request queue length"), REG_NZ },
+    { GRDATAD (RQLNT,   rqc_ctx.rq.lnt,  DEV_RDX,  8, 2, "request queue length"), REG_NZ },
     { GRDATAD (RQIDX,   rqc_ctx.rq.idx,  DEV_RDX,  8, 2, "request queue index") },
     { DRDATAD (FREE,    rqc_ctx.freq,                 5, "head of free packet list") },
     { DRDATAD (RESP,    rqc_ctx.rspq,                 5, "head of response packet list") },
@@ -1242,14 +1271,14 @@ REG rqc_reg[] = {
     { DRDATAD (HTMO,    rqc_ctx.htmo,                17, "host timeout value") },
     { FLDATA  (PRGI,    rqc_ctx.prgi,                 0), REG_HIDDEN },
     { FLDATA  (PIP,     rqc_ctx.pip,                  0), REG_HIDDEN },
-    { FLDATA  (CTYPE,   rqc_ctx.ctype,               32), REG_HIDDEN  },
+    { BINRDATA(CTYPE,   rqc_ctx.ctype,               32), REG_HIDDEN },
     { BRDATAD (PKTS,    rqc_ctx.pak,     DEV_RDX,    16, sizeof(rq_ctx.pak)/2, "packet buffers, 33W each, 32 entries") },
     { URDATAD (CPKT,    rqc_unit[0].cpkt, 10, 5, 0, RQ_NUMDR, 0, "current packet, units 0 to 3") },
     { URDATAD (UCNUM,   rqc_unit[0].cnum, 10, 5, 0, RQ_NUMDR, 0, "ctrl number, units 0 to 3") },
     { URDATAD (PKTQ,    rqc_unit[0].pktq, 10, 5, 0, RQ_NUMDR, 0, "packet queue, units 0 to 3") },
     { URDATAD (UFLG,    rqc_unit[0].uf,  DEV_RDX, 16, 0, RQ_NUMDR, 0, "unit flags, units 0 to 3") },
     { URDATA  (CAPAC,   rqc_unit[0].capac, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_HRO) },
-    { URDATAD (PLUG,    rqc_unit[0].unit_plug, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
+    { URDATAD (PLUG,    rqc_unit[0].unit_plug, 10, 32, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
     { GRDATA  (DEVADDR, rqc_dib.ba,      DEV_RDX, 32, 0), REG_HRO },
     { GRDATA  (DEVVEC,  rqc_dib.vec,     DEV_RDX, 16, 0), REG_HRO },
     { NULL }
@@ -1257,7 +1286,7 @@ REG rqc_reg[] = {
 
 DEVICE rqc_dev = {
     "RQC", rqc_unit, rqc_reg, rq_mod,
-    RQ_NUMDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
+    RQ_MAXDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
     NULL, NULL, &rq_reset,
     &rq_boot, &rq_attach, &rq_detach,
     &rqc_dib, DEV_DISABLE | DEV_DIS | DEV_UBUS | DEV_QBUS | DEV_DEBUG | DEV_DISK | DEV_SECTORS,
@@ -1280,7 +1309,7 @@ DIB rqd_dib = {
     1, IVCL (RQ), 0, { &rq_inta }, IOLN_RQ
     };
 
-UNIT rqd_unit[] = {
+UNIT rqd_unit[RQ_MAXDR + 2] = {
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
@@ -1289,8 +1318,6 @@ UNIT rqd_unit[] = {
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
     { UDATA (&rq_svc, UNIT_FIX+UNIT_ATTABLE+UNIT_DISABLE+UNIT_ROABLE+
             (RD54_DTYPE << UNIT_V_DTYPE), RQ_SIZE (RD54)) },
-    { UDATA (&rq_tmrsvc, UNIT_IDLE|UNIT_DIS, 0) },
-    { UDATA (&rq_quesvc, UNIT_DIS, 0) }
     };
 
 REG rqd_reg[] = {
@@ -1300,11 +1327,11 @@ REG rqd_reg[] = {
     { GRDATAD (COMM,    rqd_ctx.comm,    DEV_RDX, 22, 0, "comm region") },
     { GRDATAD (CQIOFF,  rqd_ctx.cq.ioff, DEV_RDX, 32, 0, "command queue intr offset") },
     { GRDATAD (CQBA,    rqd_ctx.cq.ba,   DEV_RDX, 22, 0, "command queue base address") },
-    { GRDATAD (CQLNT,   rqd_ctx.cq.lnt,  DEV_RDX, 32, 2, "command queue length"), REG_NZ },
+    { GRDATAD (CQLNT,   rqd_ctx.cq.lnt,  DEV_RDX,  8, 2, "command queue length"), REG_NZ },
     { GRDATAD (CQIDX,   rqd_ctx.cq.idx,  DEV_RDX,  8, 2, "command queue index") },
     { GRDATAD (RQIOFF,  rqd_ctx.rq.ioff, DEV_RDX, 32, 0, "request queue intr offset") },
     { GRDATAD (RQBA,    rqd_ctx.rq.ba,   DEV_RDX, 22, 0, "request queue base address") },
-    { GRDATAD (RQLNT,   rqd_ctx.rq.lnt,  DEV_RDX, 32, 2, "request queue length"), REG_NZ },
+    { GRDATAD (RQLNT,   rqd_ctx.rq.lnt,  DEV_RDX,  8, 2, "request queue length"), REG_NZ },
     { GRDATAD (RQIDX,   rqd_ctx.rq.idx,  DEV_RDX,  8, 2, "request queue index") },
     { DRDATAD (FREE,    rqd_ctx.freq,                 5, "head of free packet list") },
     { DRDATAD (RESP,    rqd_ctx.rspq,                 5, "head of response packet list") },
@@ -1317,14 +1344,14 @@ REG rqd_reg[] = {
     { DRDATAD (HTMO,    rqd_ctx.htmo,                17, "host timeout value") },
     { FLDATA  (PRGI,    rqd_ctx.prgi,                 0), REG_HIDDEN },
     { FLDATA  (PIP,     rqd_ctx.pip,                  0), REG_HIDDEN },
-    { FLDATA  (CTYPE,   rqd_ctx.ctype,               32), REG_HIDDEN  },
+    { BINRDATA(CTYPE,   rqd_ctx.ctype,               32), REG_HIDDEN },
     { BRDATAD (PKTS,    rqd_ctx.pak,     DEV_RDX,    16, sizeof(rq_ctx.pak)/2, "packet buffers, 33W each, 32 entries") },
     { URDATAD (CPKT,    rqd_unit[0].cpkt, 10, 5, 0, RQ_NUMDR, 0, "current packet, units 0 to 3") },
     { URDATAD (UCNUM,   rqd_unit[0].cnum, 10, 5, 0, RQ_NUMDR, 0, "ctrl number, units 0 to 3") },
     { URDATAD (PKTQ,    rqd_unit[0].pktq, 10, 5, 0, RQ_NUMDR, 0, "packet queue, units 0 to 3") },
     { URDATAD (UFLG,    rqd_unit[0].uf,  DEV_RDX, 16, 0, RQ_NUMDR, 0, "unit flags, units 0 to 3") },
     { URDATA  (CAPAC,   rqd_unit[0].capac, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_HRO) },
-    { URDATAD (PLUG,    rqd_unit[0].unit_plug, 10, T_ADDR_W, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
+    { URDATAD (PLUG,    rqd_unit[0].unit_plug, 10, 32, 0, RQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
     { GRDATA  (DEVADDR, rqd_dib.ba,      DEV_RDX, 32, 0), REG_HRO },
     { GRDATA  (DEVVEC,  rqd_dib.vec,     DEV_RDX, 16, 0), REG_HRO },
     { NULL }
@@ -1332,7 +1359,7 @@ REG rqd_reg[] = {
 
 DEVICE rqd_dev = {
     "RQD", rqd_unit, rqd_reg, rq_mod,
-    RQ_NUMDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
+    RQ_MAXDR + 2, DEV_RDX, T_ADDR_W, 2, DEV_RDX, 16,
     NULL, NULL, &rq_reset,
     &rq_boot, &rq_attach, &rq_detach,
     &rqd_dib, DEV_DISABLE | DEV_DIS | DEV_UBUS | DEV_QBUS | DEV_DEBUG | DEV_DISK | DEV_SECTORS,
@@ -1604,28 +1631,28 @@ return SCPE_OK;                                         /* done */
 
 /* Clock service (roughly once per second) */
 
-t_stat rq_tmrsvc (UNIT* uptr)
+t_stat rq_tmrsvc (UNIT *uptr)
 {
-	uint16 i;
-	UNIT* nuptr;
-	MSC* cp = rq_ctxmap[uptr->cnum];
-	DEVICE* dptr = rq_devmap[uptr->cnum];
+uint16 i;
+UNIT *nuptr;
+MSC *cp = rq_ctxmap[uptr->cnum];
+DEVICE *dptr = rq_devmap[uptr->cnum];
 
-	sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_tmrsvc\n");
-	sim_activate_after (uptr, 1000000);                     /* reactivate */
-	for (i = 0; i < dptr->numunits - 2; i++) {              /* poll */
-		nuptr = dptr->units + i;
-		if ((nuptr->flags & UNIT_ATP) &&                    /* ATN pending? */
-			(nuptr->flags & UNIT_ATT) &&                    /* still online? */
-			(cp->cflgs & CF_ATN)) {                         /* wanted? */
-			if (!rq_una (cp, nuptr->unit_plug))
-				return SCPE_OK;
-		}
-		nuptr->flags = nuptr->flags & ~UNIT_ATP;
-	}
-	if ((cp->hat > 0) && (--cp->hat == 0))                  /* host timeout? */
-		rq_fatal (cp, PE_HAT);                              /* fatal err */
-	return SCPE_OK;
+sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_tmrsvc\n");
+sim_activate_after (uptr, 1000000);                     /* reactivate */
+for (i = 0; i < dptr->numunits - 2; i++) {                        /* poll */
+    nuptr = dptr->units + i;
+    if ((nuptr->flags & UNIT_ATP) &&                    /* ATN pending? */
+        (nuptr->flags & UNIT_ATT) &&                    /* still online? */
+        (cp->cflgs & CF_ATN)) {                         /* wanted? */
+        if (!rq_una (cp, nuptr->unit_plug))
+            return SCPE_OK;
+        }
+    nuptr->flags = nuptr->flags & ~UNIT_ATP;
+    }
+if ((cp->hat > 0) && (--cp->hat == 0))                  /* host timeout? */
+    rq_fatal (cp, PE_HAT);                              /* fatal err */ 
+return SCPE_OK;
 }
 
 /* MSCP packet handling */
@@ -1790,45 +1817,45 @@ return rq_putpkt (cp, pkt, TRUE);
 
 /* Get unit status */
 
-t_bool rq_gus (MSC* cp, uint16 pkt, t_bool q)
+t_bool rq_gus (MSC *cp, uint16 pkt, t_bool q)
 {
-	uint16 lu = cp->pak[pkt].d[CMD_UN];                     /* unit # */
-	uint16 cmd = GETP (pkt, CMD_OPC, OPC);                  /* opcode */
-	uint16 dtyp, sts, rbpar;
-	UNIT* uptr;
+uint16 lu = cp->pak[pkt].d[CMD_UN];                     /* unit # */
+uint16 cmd = GETP (pkt, CMD_OPC, OPC);                  /* opcode */
+uint16 dtyp, sts, rbpar;
+UNIT *uptr;
 
-	sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_gus\n");
+sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_gus\n");
 
-	if (cp->pak[pkt].d[CMD_MOD] & MD_NXU) {                 /* next unit? */
-		if (lu == 65535) {                                  /* end of range? */
-			lu = 0;                                         /* reset to 0 */
-			cp->pak[pkt].d[RSP_UN] = lu;
-		}
-	}
-	if ((uptr = rq_getucb (cp, lu))) {                      /* unit exist? */
-		if ((uptr->flags & UNIT_ATT) == 0)                  /* not attached? */
-			sts = ST_OFL | SB_OFL_NV;                       /* offl no vol */
-		else if (uptr->flags & UNIT_ONL)                    /* online */
-			sts = ST_SUC;
-		else sts = ST_AVL;                                  /* avail */
-		rq_putr_unit (cp, pkt, uptr, lu, FALSE);            /* fill unit fields */
-		dtyp = GET_DTYPE (uptr->flags);                     /* get drive type */
-		if (drv_tab[dtyp].rcts)                             /* ctrl bad blk? */
-			rbpar = 1;
-		else rbpar = 0;                                     /* fill geom, bblk */
-		cp->pak[pkt].d[GUS_TRK] = drv_tab[dtyp].sect;
-		cp->pak[pkt].d[GUS_GRP] = drv_tab[dtyp].tpg;
-		cp->pak[pkt].d[GUS_CYL] = drv_tab[dtyp].gpc;
-		cp->pak[pkt].d[GUS_UVER] = 0;
-		cp->pak[pkt].d[GUS_RCTS] = drv_tab[dtyp].rcts;
-		cp->pak[pkt].d[GUS_RBSC] =
-			(rbpar << GUS_RB_V_RBNS) | (rbpar << GUS_RB_V_RCTC);
-	}
-	else sts = ST_OFL;                                      /* offline */
-	cp->pak[pkt].d[GUS_SHUN] = lu;                          /* shadowing */
-	cp->pak[pkt].d[GUS_SHST] = 0;
-	rq_putr (cp, pkt, cmd | OP_END, 0, sts, GUS_LNT_D, UQ_TYP_SEQ);
-	return rq_putpkt (cp, pkt, TRUE);
+if (cp->pak[pkt].d[CMD_MOD] & MD_NXU) {                 /* next unit? */
+    if (lu > cp->max_plug) {                            /* beyond last unit plug? */
+        lu = 0;                                         /* reset to 0 */
+        cp->pak[pkt].d[RSP_UN] = lu;
+        }
+    }
+if ((uptr = rq_getucb (cp, lu))) {                      /* unit exist? */
+    if ((uptr->flags & UNIT_ATT) == 0)                  /* not attached? */
+        sts = ST_OFL | SB_OFL_NV;                       /* offl no vol */
+    else if (uptr->flags & UNIT_ONL)                    /* online */
+        sts = ST_SUC;
+    else sts = ST_AVL;                                  /* avail */
+    rq_putr_unit (cp, pkt, uptr, lu, FALSE);            /* fill unit fields */
+    dtyp = GET_DTYPE (uptr->flags);                     /* get drive type */
+    if (drv_tab[dtyp].rcts)                             /* ctrl bad blk? */
+        rbpar = 1;
+    else rbpar = 0;                                     /* fill geom, bblk */
+    cp->pak[pkt].d[GUS_TRK] = drv_tab[dtyp].sect;
+    cp->pak[pkt].d[GUS_GRP] = drv_tab[dtyp].tpg;
+    cp->pak[pkt].d[GUS_CYL] = drv_tab[dtyp].gpc;
+    cp->pak[pkt].d[GUS_UVER] = 0;
+    cp->pak[pkt].d[GUS_RCTS] = drv_tab[dtyp].rcts;
+    cp->pak[pkt].d[GUS_RBSC] =
+        (rbpar << GUS_RB_V_RBNS) | (rbpar << GUS_RB_V_RCTC);
+    }
+else sts = ST_OFL;                                      /* offline */
+cp->pak[pkt].d[GUS_SHUN] = lu;                          /* shadowing */
+cp->pak[pkt].d[GUS_SHST] = 0;
+rq_putr (cp, pkt, cmd | OP_END, 0, sts, GUS_LNT_D, UQ_TYP_SEQ);
+return rq_putpkt (cp, pkt, TRUE);
 }
 
 /* Unit online - defer if q'd commands */
@@ -2181,8 +2208,8 @@ bl = GETP32 (pkt, RW_WBLL);                             /* block addr */
 ma = GETP32 (pkt, RW_WMPL);                             /* block addr */
 
 sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_svc(%s,unit=%d, pkt=%d, cmd=%s, lbn=%0X, bc=%0x, phase=%s)\n",
-    sim_uname (uptr), uptr->unit_plug, pkt, rq_cmdname[cp->pak[pkt].d[CMD_OPC] & 0x3f], bl, bc,
-    uptr->io_complete ? "bottom" : "top");
+           sim_uname (uptr), uptr->unit_plug, pkt, rq_cmdname[cp->pak[pkt].d[CMD_OPC]&0x3f], bl, bc,
+           uptr->io_complete ? "bottom" : "top");
 
 tbc = (bc > RQ_MAXFR)? RQ_MAXFR: bc;                    /* trim cnt to max */
 
@@ -2444,23 +2471,23 @@ return rq_putpkt (cp, pkt, TRUE);
 
 /* Unit now available attention packet */
 
-t_bool rq_una (MSC* cp, uint16 lu)
+t_bool rq_una (MSC *cp, uint16 lu)
 {
-	uint16 pkt;
-	UNIT* uptr = rq_getucb (cp, lu);
+uint16 pkt;
+UNIT *uptr = rq_getucb (cp, lu);
 
-	if (uptr == NULL)                                       /* huh? */
-		return OK;
-    sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_una (%s. Unit=%d)\n", sim_uname (uptr), lu);
-	if (!rq_deqf (cp, &pkt))                                /* get log pkt */
-		return ERR;
-	cp->pak[pkt].d[RSP_REFL] = 0;                           /* ref = 0 */
-	cp->pak[pkt].d[RSP_REFH] = 0;
-	cp->pak[pkt].d[RSP_UN] = lu;
-	cp->pak[pkt].d[RSP_RSV] = 0;
-	rq_putr_unit (cp, pkt, uptr, lu, FALSE);                /* fill unit fields */
-	rq_putr (cp, pkt, OP_AVA, 0, 0, UNA_LNT, UQ_TYP_SEQ);   /* fill std fields */
-	return rq_putpkt (cp, pkt, TRUE);
+if (uptr == NULL)                                       /* huh? */
+    return OK;
+sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_una (%s. Unit=%d)\n", sim_uname (uptr), lu);
+if (!rq_deqf (cp, &pkt))                                /* get log pkt */
+    return ERR;
+cp->pak[pkt].d[RSP_REFL] = 0;                           /* ref = 0 */
+cp->pak[pkt].d[RSP_REFH] = 0;
+cp->pak[pkt].d[RSP_UN] = lu;
+cp->pak[pkt].d[RSP_RSV] = 0;
+rq_putr_unit (cp, pkt, uptr, lu, FALSE);                /* fill unit fields */
+rq_putr (cp, pkt, OP_AVA, 0, 0, UNA_LNT, UQ_TYP_SEQ);   /* fill std fields */
+return rq_putpkt (cp, pkt, TRUE);
 }
 
 /* List handling
@@ -2629,16 +2656,16 @@ return OK;
 
 /* Get unit descriptor for logical unit */
 
-UNIT* rq_getucb (MSC* cp, uint16 lu)
+UNIT *rq_getucb (MSC *cp, uint16 lu)
 {
-    DEVICE* dptr = rq_devmap[cp->cnum];
-    uint32 i;
+DEVICE *dptr = rq_devmap[cp->cnum];
+uint32 i;
 
-    for (i = 0; i < dptr->numunits - 2; i++)
-        if ((lu == dptr->units[i].unit_plug) &&
-            !(dptr->units[i].flags & UNIT_DIS))
-            return &dptr->units[i];
-    return NULL;
+for (i = 0; i < dptr->numunits - 2; i++)
+    if ((lu == dptr->units[i].unit_plug) &&
+        !(dptr->units[i].flags & UNIT_DIS))
+        return &dptr->units[i];
+return NULL;
 }
 
 /* Hack unit flags */
@@ -2654,29 +2681,29 @@ return;
 
 /* Unit response fields */
 
-void rq_putr_unit (MSC* cp, uint16 pkt, UNIT* uptr, uint16 lu, t_bool all)
+void rq_putr_unit (MSC *cp, uint16 pkt, UNIT *uptr, uint16 lu, t_bool all)
 {
-	uint32 dtyp = GET_DTYPE (uptr->flags);                  /* get drive type */
-	uint32 maxlbn = (uint32) uptr->capac;                    /* get max lbn */
+uint32 dtyp = GET_DTYPE (uptr->flags);                  /* get drive type */
+uint32 maxlbn = (uint32)uptr->capac;                    /* get max lbn */
 
-	sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_putr_unit\n");
+sim_debug (DBG_TRC, rq_devmap[cp->cnum], "rq_putr_unit\n");
 
-	cp->pak[pkt].d[ONL_MLUN] = lu;                          /* unit */
-	cp->pak[pkt].d[ONL_UFL] = (uint16) (uptr->uf | UF_RPL | RQ_WPH (uptr) | RQ_RMV (uptr));
-	cp->pak[pkt].d[ONL_RSVL] = 0;                           /* reserved */
-	cp->pak[pkt].d[ONL_RSVH] = 0;
-	cp->pak[pkt].d[ONL_UIDA] = lu;                          /* UID low */
-	cp->pak[pkt].d[ONL_UIDB] = 0;
-	cp->pak[pkt].d[ONL_UIDC] = 0;
-	cp->pak[pkt].d[ONL_UIDD] = (UID_DISK << ONL_UIDD_V_CLS) |
-		(drv_tab[dtyp].mod << ONL_UIDD_V_MOD);              /* UID hi */
-	PUTP32 (pkt, ONL_MEDL, drv_tab[dtyp].MediaId);          /* media type */
-	if (all) {                                              /* if long form */
-		PUTP32 (pkt, ONL_SIZL, maxlbn);                     /* user LBNs */
-		cp->pak[pkt].d[ONL_VSNL] = 01234 + lu;              /* vol serial # */
-		cp->pak[pkt].d[ONL_VSNH] = 0;
-	}
-	return;
+cp->pak[pkt].d[ONL_MLUN] = lu;                          /* unit */
+cp->pak[pkt].d[ONL_UFL] = (uint16)(uptr->uf | UF_RPL | RQ_WPH (uptr) | RQ_RMV (uptr));
+cp->pak[pkt].d[ONL_RSVL] = 0;                           /* reserved */
+cp->pak[pkt].d[ONL_RSVH] = 0;
+cp->pak[pkt].d[ONL_UIDA] = lu;                          /* UID low */
+cp->pak[pkt].d[ONL_UIDB] = 0;
+cp->pak[pkt].d[ONL_UIDC] = 0;
+cp->pak[pkt].d[ONL_UIDD] = (UID_DISK << ONL_UIDD_V_CLS) |
+    (drv_tab[dtyp].mod << ONL_UIDD_V_MOD);              /* UID hi */
+PUTP32 (pkt, ONL_MEDL, drv_tab[dtyp].MediaId);          /* media type */
+if (all) {                                              /* if long form */
+    PUTP32 (pkt, ONL_SIZL, maxlbn);                     /* user LBNs */
+    cp->pak[pkt].d[ONL_VSNL] = 01234 + lu;              /* vol serial # */
+    cp->pak[pkt].d[ONL_VSNH] = 0;
+    }
+return;
 }
 
 /* UQ_HDR and RSP_OP fields */
@@ -2710,7 +2737,7 @@ void rq_ring_int (MSC *cp, struct uq_ring *ring)
 uint32 iadr = cp->comm + ring->ioff;                    /* addr intr wd */
 uint16 flag = 1;
 
-Map_WriteW (iadr, 2, &flag);                            /* write flag */
+(void)Map_WriteW (iadr, 2, &flag);                      /* write flag */
 if (cp->s1dat & SA_S1H_VEC)                             /* if enb, intr */
     rq_setint (cp);
 return;
@@ -2837,34 +2864,70 @@ return SCPE_OK;
 
 /* Show unit plug */
 
-t_stat rq_show_plug (FILE* st, UNIT* uptr, int32 val, CONST void* desc)
+t_stat rq_show_plug (FILE *st, UNIT *uptr, int32 val, CONST void *desc)
 {
-    fprintf (st, "UNIT=%d", uptr->unit_plug);
-    return SCPE_OK;
+fprintf (st, "UNIT=%d", uptr->unit_plug);
+return SCPE_OK;
 }
 
 /* Set unit plug */
 
-t_stat rq_set_plug (UNIT* uptr, int32 val, CONST char* cptr, void* desc)
+t_stat rq_set_plug (UNIT *uptr, int32 val, CONST char *cptr, void *desc)
 {
-    MSC* cp = rq_ctxmap[uptr->cnum];
-    int32 plug;
-    uint32 i;
-    t_stat r;
-    DEVICE* dptr = find_dev_from_unit (uptr);
+int32 plug;
+uint32 i;
+t_stat r;
+DEVICE *dptr = find_dev_from_unit (uptr);
 
-    if (cptr == NULL)
-        return sim_messagef (SCPE_ARG, "Must specify UNIT=value\n");
-    plug = (int32) get_uint (cptr, 10, 0xFFFFFFFF, &r);
-    if ((r != SCPE_OK) || (plug > 65534))
-        return sim_messagef (SCPE_ARG, "Invalid Unit Plug Number: %s\n", cptr);
-    if (uptr->unit_plug == plug)
-        return SCPE_OK;
-    for (i = 0; i < dptr->numunits - 2; i++)
-        if (dptr->units[i].unit_plug == plug)
-            return sim_messagef (SCPE_ARG, "Unit Plug %d Already In Use on %s\n", plug, sim_uname (&dptr->units[i]));
-    uptr->unit_plug = plug;
+if (cptr == NULL)
+    return sim_messagef (SCPE_ARG, "Must specify UNIT=value\n");
+plug = (int32) get_uint (cptr, 10, 0xFFFFFFFF, &r);
+if ((r != SCPE_OK) || (plug > 65534))
+    return sim_messagef (SCPE_ARG, "Invalid Unit Plug Number: %s\n", cptr);
+if (uptr->unit_plug == plug)
     return SCPE_OK;
+for (i=0; i < dptr->numunits - 2; i++)
+    if (dptr->units[i].unit_plug == plug)
+        return sim_messagef (SCPE_ARG, "Unit Plug %d Already In Use on %s\n", plug, sim_uname (&dptr->units[i]));
+uptr->unit_plug = plug;
+return SCPE_OK;
+}
+
+/* Set number of drives */
+
+t_stat rq_set_drives (UNIT *uptr, int32 val, CONST char *cptr, void *desc)
+{
+uint32 new_drives;
+uint32 i;
+t_stat r;
+DEVICE *dptr = find_dev_from_unit (uptr);
+uint32 old_drives = 0;
+
+if ((cptr == NULL) || (*cptr == '\0'))
+    return sim_messagef (SCPE_ARG, "Must specify DRIVES=value\n");
+for (i=0; i < dptr->numunits; i++) {
+    if (dptr->units[i].flags & UNIT_DISABLE)
+        ++old_drives;
+    }
+new_drives = (int32) get_uint (cptr, 10, RQ_MAXDR, &r);
+if ((r != SCPE_OK) || (new_drives > RQ_MAXDR) || (new_drives < RQ_NUMDR))
+    return sim_messagef (SCPE_ARG, "Invalid Number of Drives: %s\n", cptr);
+if (old_drives == new_drives)
+    return SCPE_OK;                         /* Nothing to do */
+for (i=new_drives; i < old_drives; i++) {
+    if (dptr->units[i].flags & UNIT_ATT)
+        return sim_messagef (SCPE_ALATT, "Can't change number of drives on %s with %s attached to %s.\n", 
+                                         dptr->name, sim_uname (&dptr->units[i]), dptr->units[i].filename);
+    }
+for (i=old_drives; i < new_drives; i++) {
+    dptr->units[i].flags &= ~UNIT_DIS;
+    dptr->units[i].flags |= UNIT_DISABLE;
+    }
+for (i=new_drives; i < old_drives; i++) {
+    dptr->units[i].flags |= UNIT_DIS;
+    dptr->units[i].flags &= ~UNIT_DISABLE;
+    }
+return SCPE_OK;
 }
 
 /* Show unit type */
@@ -2903,7 +2966,8 @@ t_stat rq_attach (UNIT *uptr, CONST char *cptr)
 MSC *cp = rq_ctxmap[uptr->cnum];
 t_stat r;
 
-r = sim_disk_attach (uptr, cptr, RQ_NUMBY, sizeof (uint16), (uptr->flags & UNIT_NOAUTO), DBG_DSK, drv_tab[GET_DTYPE (uptr->flags)].name, 0, 0);
+r = sim_disk_attach_ex (uptr, cptr, RQ_NUMBY, sizeof (uint16), (uptr->flags & UNIT_NOAUTO), DBG_DSK, 
+                        drv_tab[GET_DTYPE (uptr->flags)].name, 0, 0, (uptr->flags & UNIT_NOAUTO) ? NULL : drv_types);
 if (r != SCPE_OK)
     return r;
 
@@ -2930,7 +2994,8 @@ return SCPE_OK;
 
 t_stat rq_reset (DEVICE *dptr)
 {
-int32 i, j, cidx;
+uint32 i;
+int32 j, cidx;
 UNIT *uptr;
 MSC *cp;
 static t_bool plugs_inited = FALSE;
@@ -2949,22 +3014,38 @@ cp->cnum = cidx;                                        /* init index */
 if (cp->ctype == DEFAULT_CTYPE)
     cp->ctype = (UNIBUS? UDA50_CTYPE : RQDX3_CTYPE);
 
-if (!plugs_inited) {
-    uint32 d, u = 0;
+if (!plugs_inited ) {
+#if !defined (VM_VAX)
+    uint32 u = 0;
+#endif
+    uint32 d;
+    char uname[16];
 
-    plugs_inited = TRUE;
+    plugs_inited  = TRUE;
     for (i = 0; i < RQ_NUMCT; i++) {
+        rq_devmap[i]->units[RQ_TIMER].action = &rq_tmrsvc;
+        rq_devmap[i]->units[RQ_TIMER].flags = UNIT_IDLE|UNIT_DIS;
+        sprintf (uname, "%s-TIMER", rq_devmap[i]->name);
+        sim_set_uname (&rq_devmap[i]->units[RQ_TIMER], uname);
+        rq_devmap[i]->units[RQ_QUEUE].action = &rq_quesvc;
+        rq_devmap[i]->units[RQ_QUEUE].flags = UNIT_DIS;
+        sprintf (uname, "%s-QUESVC", rq_devmap[i]->name);
+        sim_set_uname (&rq_devmap[i]->units[RQ_QUEUE], uname);
         for (d = 0; d < rq_devmap[i]->numunits - 2; d++) {
-            rq_devmap[i]->units[d].unit_plug =
+            if (d >= RQ_NUMDR) {
+                rq_devmap[i]->units[d] = rq_devmap[i]->units[0];
+                rq_devmap[i]->units[d].flags |= UNIT_DIS;
+                rq_devmap[i]->units[d].flags &= ~UNIT_DISABLE;
+                }
+            rq_devmap[i]->units[d].unit_plug = 
 #if defined (VM_VAX)
                 d;          /* VAX default units */
 #else           
-                u;          /* PDP11 unique unit numbers */
+                (d < RQ_NUMDR) ? u++ : d;          /* PDP11 unique unit numbers */
 #endif
-            ++u;
+            }
         }
     }
-}
 
 cp->csta = CST_S1;                                      /* init stage 1 */
 cp->s1dat = 0;                                          /* no S1 data */
@@ -2972,7 +3053,8 @@ dibp->vec = 0;                                          /* no vector */
 cp->comm = 0;                                           /* no comm region */
 if (UNIBUS)                                             /* Unibus? */
     cp->sa = SA_S1 | SA_S1C_DI | SA_S1C_MP;
-else cp->sa = SA_S1 | SA_S1C_Q22 | SA_S1C_DI | SA_S1C_MP; /* init SA val */
+else
+    cp->sa = SA_S1 | SA_S1C_Q22 | SA_S1C_DI | SA_S1C_MP;/* init SA val */
 cp->cflgs = CF_RPL;                                     /* ctrl flgs off */
 cp->htmo = RQ_DHTMO;                                    /* default timeout */
 cp->hat = cp->htmo;                                     /* default timer */
@@ -2991,8 +3073,8 @@ cp->rspq = 0;                                           /* no q'd rsp pkts */
 cp->pbsy = 0;                                           /* all pkts free */
 cp->pip = 0;                                            /* not polling */
 rq_clrint (cp);                                         /* clr intr req */
-for (i = 0; i < (RQ_NUMDR + 2); i++) {                  /* init units */
-    uptr = dptr->units + i;
+for (i = 0; i < dptr->numunits; i++) {                  /* init units */
+    uptr = &dptr->units[i];
     sim_cancel (uptr);                                  /* clr activity */
     sim_disk_reset (uptr);
     uptr->cnum = cidx;                                  /* set ctrl index */
@@ -3003,6 +3085,9 @@ for (i = 0; i < (RQ_NUMDR + 2); i++) {                  /* init units */
     if (uptr->rqxb == NULL)
         return SCPE_MEM;
     }
+for (i=cp->max_plug = 0; i < (dptr->numunits - 2); i++)
+    if ((0 == (dptr->units[i].flags & UNIT_DIS)) && (dptr->units[i].unit_plug > cp->max_plug))
+        cp->max_plug = (uint16)dptr->units[i].unit_plug;
 return auto_config (0, 0);                              /* run autoconfig */
 }
 
@@ -3082,18 +3167,18 @@ static const uint16 boot_rom[] = {
     0000000
     };
 
-t_stat rq_boot (int32 unitno, DEVICE* dptr)
+t_stat rq_boot (int32 unitno, DEVICE *dptr)
 {
-    size_t i;
-    DIB* dibp = (DIB*) dptr->ctxt;
-    UNIT* uptr = &dptr->units[unitno];
+size_t i;
+DIB *dibp = (DIB *) dptr->ctxt;
+UNIT *uptr = &dptr->units[unitno];
 
-    for (i = 0; i < BOOT_LEN; i++)
-        M[(BOOT_START >> 1) + i] = boot_rom[i];
-    M[BOOT_UNIT >> 1] = (uint16) uptr->unit_plug;
-    M[BOOT_CSR >> 1] = dibp->ba & DMASK;
-    cpu_set_boot (BOOT_ENTRY);
-    return SCPE_OK;
+for (i = 0; i < BOOT_LEN; i++)
+    WrMemW (BOOT_START + (2 * i), boot_rom[i]);
+WrMemW (BOOT_UNIT, (uint16)uptr->unit_plug);
+WrMemW (BOOT_CSR, dibp->ba & DMASK);
+cpu_set_boot (BOOT_ENTRY);
+return SCPE_OK;
 }
 
 #else
@@ -3190,7 +3275,8 @@ t_stat rq_show_ctrl (FILE *st, UNIT *uptr, int32 val, CONST void *desc)
 {
 MSC *cp = rq_ctxmap[uptr->cnum];
 DEVICE *dptr = rq_devmap[uptr->cnum];
-int32 i, pkt;
+uint32 i;
+int32 pkt;
 
 if (cp->csta != CST_UP) {
     fprintf (st, "Controller is not initialized\n");
@@ -3228,8 +3314,9 @@ if (val & RQ_SH_RS) {
     else fprintf (st, "Response queue is empty\n");
     }
 if (val & RQ_SH_UN) {
-    for (i = 0; i < RQ_NUMDR; i++)
-        rq_show_unitq (st, dptr->units + i, 0, desc);
+    for (i = 0; i < (dptr->numunits - 2); i++)
+        if (0 == (dptr->units[i].flags & UNIT_DIS)) 
+            rq_show_unitq (st, &dptr->units[i], 0, desc);
     }
 return SCPE_OK;
 }

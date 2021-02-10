@@ -42,12 +42,16 @@ enum display_type {
      * of the PDP-1, and thus all DEC machines.
      */
     DIS_TX0 = 0,
+    DIS_IMLAC = 1,
     DIS_VR14 = 14,
     DIS_VR17 = 17,
     DIS_VR20 = 20,
     DIS_TYPE30 = 30,
     DIS_VR48 = 48,
-    DIS_TYPE340 = 340
+    DIS_III = 111,
+    DIS_TYPE340 = 340,
+    DIS_NG = 999,
+    DIS_TT2500 = 2500,
 };
 
 /*
@@ -63,6 +67,11 @@ enum display_type {
  * (but called implicitly by display_point())
  */
 extern int display_init(enum display_type, int scale, void *dptr);
+
+/*
+ * close display
+ */
+extern void display_close(void *dptr);
 
 /* return size of virtual display */
 extern int display_xpoints(void);
@@ -81,6 +90,11 @@ extern int display_scale(void);
  * Under X11 polls for window events!!
  */
 extern int display_age(int,int);
+
+/*
+ * Return true if the display is blank.
+ */
+extern int display_is_blank(void);
 
 /*
  * display intensity levels.
@@ -194,6 +208,11 @@ extern unsigned long spacewar_switches;
     SWSW('n', 'N',   0400000000, LR, CW) /* rotate R */         \
     SWSW('m', 'M',  01000000000, LR, CCW) /* rotate L */        \
     SWSW('/', '?',  02000000000, LR, HYPER) /* hyperspace */
+
+/*
+ * The last character typed in the display window.
+ */
+extern unsigned char display_last_char;
 
 /*
  * light pen "tip switch" activated (for VS60 emulation etc.)

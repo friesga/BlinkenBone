@@ -256,8 +256,9 @@ uint32 tq_pip = 0;                                      /* poll in progress */
 struct uq_ring tq_cq = { 0 };                           /* cmd ring */
 struct uq_ring tq_rq = { 0 };                           /* rsp ring */
 struct tqpkt tq_pkt[TQ_NPKTS];                          /* packet queue */
-uint16 tq_freq = 0;                                      /* free list */
-uint16 tq_rspq = 0;                                      /* resp list */
+uint16 tq_freq = 0;                                     /* free list */
+uint16 tq_rspq = 0;                                     /* resp list */
+uint16 tq_max_plug;                                     /* highest unit plug number */
 uint32 tq_pbsy = 0;                                     /* #busy pkts */
 uint32 tq_credits = 0;                                  /* credits */
 uint32 tq_hat = 0;                                      /* host timer */
@@ -354,8 +355,8 @@ t_stat tq_show_ctrl (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
 t_stat tq_show_unitq (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
 t_stat tq_set_type (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
 t_stat tq_show_type (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
-t_stat tq_set_plug (UNIT* uptr, int32 val, CONST char* cptr, void* desc);
-t_stat tq_show_plug (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
+t_stat tq_set_plug (UNIT *uptr, int32 val, CONST char *cptr, void *desc);
+t_stat tq_show_plug (FILE *st, UNIT *uptr, int32 val, CONST void *desc);
 static t_stat tq_help (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, const char *cptr);
 const char *tq_description (DEVICE *dptr);
 
@@ -463,8 +464,8 @@ REG tq_reg[] = {
     { DRDATAD (QTIME,               tq_qtime, 24,             "response time for 'immediate' packets"), PV_LEFT + REG_NZ },
     { DRDATAD (XTIME,               tq_xtime, 24,             "response time for data transfers"), PV_LEFT + REG_NZ },
     { DRDATAD (RWTIME,             tq_rwtime, 32,             "rewind time 2 sec (adjusted later)"), PV_LEFT + REG_NZ },
-    { BRDATAD (PKTS,                  tq_pkt, DEV_RDX, 16, TQ_NPKTS * (TQ_PKT_SIZE_W + 1), "packet buffers, 33W each, 32 entries") },
-    { URDATAD (PLUG,    tq_unit[0].unit_plug, 10, T_ADDR_W, 0, TQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
+    { BRDATAD (PKTS,                 tq_pkt, DEV_RDX, 16, TQ_NPKTS * (TQ_PKT_SIZE_W + 1), "packet buffers, 33W each, 32 entries") },
+    { URDATAD (PLUG,    tq_unit[0].unit_plug, 10, 32, 0, TQ_NUMDR, PV_LEFT | REG_RO, "unit plug value, units 0 to 3") },
     { DRDATA  (DEVTYPE,               tq_typ, 2), REG_HRO },
     { DRDATA  (DEVCAP, drv_tab[TQU_TYPE].cap, T_ADDR_W), PV_LEFT | REG_HRO },
     { GRDATA  (DEVADDR,            tq_dib.ba, DEV_RDX, 32, 0), REG_HRO },
@@ -487,7 +488,7 @@ MTAB tq_mod[] = {
         &tq_set_type, NULL, NULL, "Set TKUSER=size Device Type"  },
     { MTAB_XTD|MTAB_VDV,         0,         "TYPE",  NULL,
         NULL, &tq_show_type, NULL, "Display device type" },
-    { MTAB_XTD | MTAB_VUN | MTAB_VALR, 0, "UNIT", "UNIT=val (0-65534)",
+    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0, "UNIT", "UNIT=val (0-65534)",
       &tq_set_plug, &tq_show_plug, NULL, "Set/Display Unit plug value" },
     { MTAB_XTD|MTAB_VDV|MTAB_NMO, TQ_SH_RI, "RINGS", NULL,
         NULL, &tq_show_ctrl, NULL, "Display command and response rings" },
@@ -501,8 +502,8 @@ MTAB tq_mod[] = {
         NULL, &tq_show_ctrl, NULL, "Display complete controller state" },
     { MTAB_XTD|MTAB_VUN|MTAB_NMO, 0,        "UNITQ", NULL,
         NULL, &tq_show_unitq, NULL, "Display unit queue" },
-    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0,       "FORMAT", "FORMAT",
-        &sim_tape_set_fmt, &sim_tape_show_fmt, NULL, "Set/Display tape format (SIMH, E11, TPC, P7B)" },
+    { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0, "FORMAT", "FORMAT",
+        &sim_tape_set_fmt, &sim_tape_show_fmt, NULL, "Set/Display tape format (SIMH, E11, TPC, P7B, AWS, TAR)" },
     { MTAB_XTD|MTAB_VUN|MTAB_VALR, 0,       "CAPACITY", "CAPACITY",
         &sim_tape_set_capac, &sim_tape_show_capac, NULL, "Set/Display capacity" },
 #if defined (VM_PDP11)
@@ -846,7 +847,7 @@ else {                                                  /* valid cmd */
             return OK;
             }
 //      if (tq_cmf[cmd] & MD_CDL)                       /* clr cch lost? */
-//          uptr->flags = uptr->flags & ~UNIT_CDL; 
+//          uptr->flags = uptr->flags & ~UNIT_CDL;
         if ((mdf & MD_CSE) && (uptr->flags & UNIT_SXC)) /* clr ser exc? */
             uptr->flags = uptr->flags & ~UNIT_SXC;
         memset (uptr->results, 0, sizeof (struct tq_req_results)); /* init request state */
@@ -1019,7 +1020,7 @@ UNIT *uptr;
 sim_debug(DBG_TRC, &tq_dev, "tq_gus\n");
 
 if (tq_pkt[pkt].d[CMD_MOD] & MD_NXU) {                  /* next unit? */
-    if (lu == 65535) {                                  /* end of range? */
+    if (lu > tq_max_plug) {                             /* beyond last unit plug? */
         lu = 0;                                         /* reset to 0 */
         tq_pkt[pkt].d[RSP_UN] = (uint16)lu;
         }
@@ -1208,8 +1209,13 @@ if ((uptr = tq_getucb (lu))) {                          /* unit exist? */
     if (sts == ST_SUC) {                                /* ok? */
         uptr->cpkt = pkt;                               /* op in progress */
         if ((tq_pkt[pkt].d[CMD_MOD] & MD_RWD) &&        /* rewind? */
-            (!(tq_pkt[pkt].d[CMD_MOD] & MD_IMM)))       /* !immediate? */
-            sim_activate_after (uptr, 2000000);         /* use 2 sec rewind execute time */
+            (!(tq_pkt[pkt].d[CMD_MOD] & MD_IMM))) {     /* !immediate? */
+            double walltime = (tq_rwtime - 100);
+
+            if (uptr->hwmark)
+                walltime *= ((double)uptr->pos)/uptr->hwmark;
+            sim_activate_after_d (uptr, 100 + walltime);/* use scaled 2 sec rewind execute time */
+            }
         else {                                          /* otherwise */
             uptr->iostarttime = sim_grtime();
             sim_activate (uptr, 0);                     /* use normal execute time */
@@ -1502,8 +1508,6 @@ t_stat tq_mot_err (UNIT *uptr, uint32 rsiz)
 uptr->flags = (uptr->flags | UNIT_SXC) & ~UNIT_TMK;     /* serious exception */
 if (tq_dte (uptr, ST_DRV))                              /* post err log */
     tq_mot_end (uptr, EF_LOG, ST_DRV, rsiz);            /* if ok, report err */
-sim_perror ("TQ I/O error");
-clearerr (uptr->fileref);
 return SCPE_IOERR;
 }
 
@@ -1725,20 +1729,20 @@ return tq_putpkt (pkt, TRUE);
 
 /* Unit now available attention packet */
 
-t_bool tq_una (UNIT* uptr)
+t_bool tq_una (UNIT *uptr)
 {
-	uint16 pkt;
-	uint16 lu;
+uint16 pkt;
+uint16 lu;
 
-	if (!tq_deqf (&pkt))                                    /* get log pkt */
-		return ERR;
-	lu = (uint16) (uptr->unit_plug);                        /* get unit */
-	tq_pkt[pkt].d[RSP_REFL] = tq_pkt[pkt].d[RSP_REFH] = 0;  /* ref = 0 */
-	tq_pkt[pkt].d[RSP_UN] = lu;
-	tq_pkt[pkt].d[RSP_RSV] = 0;
-	tq_putr_unit (pkt, uptr, lu, FALSE);                    /* fill unit fields */
-	tq_putr (pkt, OP_AVA, 0, 0, UNA_LNT, UQ_TYP_SEQ);       /* fill std fields */
-	return tq_putpkt (pkt, TRUE);
+if (!tq_deqf (&pkt))                                    /* get log pkt */
+    return ERR;
+lu = (uint16) (uptr->unit_plug);                        /* get unit */
+tq_pkt[pkt].d[RSP_REFL] = tq_pkt[pkt].d[RSP_REFH] = 0;  /* ref = 0 */
+tq_pkt[pkt].d[RSP_UN] = lu;
+tq_pkt[pkt].d[RSP_RSV] = 0;
+tq_putr_unit (pkt, uptr, lu, FALSE);                    /* fill unit fields */
+tq_putr (pkt, OP_AVA, 0, 0, UNA_LNT, UQ_TYP_SEQ);       /* fill std fields */
+return tq_putpkt (pkt, TRUE);
 }
 
 /* List handling
@@ -1910,18 +1914,18 @@ return OK;
 /* Get unit descriptor for logical unit - trivial now,
    but eventually, hide multiboard complexities here */
 
-UNIT* tq_getucb (uint16 lu)
+UNIT *tq_getucb (uint16 lu)
 {
-    uint32 i;
-    UNIT* uptr;
+uint32 i;
+UNIT *uptr;
 
-    for (i = 0; i < tq_dev.numunits - 2; i++) {
-        uptr = &tq_dev.units[i];
-        if ((lu == uptr->unit_plug) &&
-            !(uptr->flags & UNIT_DIS))
-            return uptr;
+for (i = 0; i < tq_dev.numunits - 2; i++) {
+    uptr = &tq_dev.units[i];
+    if ((lu == uptr->unit_plug) &&
+        !(uptr->flags & UNIT_DIS))
+        return uptr;
     }
-    return NULL;
+return NULL;
 }
 
 /* Hack unit flags */
@@ -2005,7 +2009,7 @@ void tq_ring_int (struct uq_ring *ring)
 uint32 iadr = tq_comm + ring->ioff;                     /* addr intr wd */
 uint16 flag = 1;
 
-Map_WriteW (iadr, 2, &flag);                            /* write flag */
+(void)Map_WriteW (iadr, 2, &flag);                      /* write flag */
 if (tq_dib.vec)                                         /* if enb, intr */
     SET_INT (TQ);
 return;
@@ -2062,59 +2066,66 @@ return SCPE_OK;
 
 /* Device reset */
 
-t_stat tq_reset (DEVICE* dptr)
+t_stat tq_reset (DEVICE *dptr)
 {
-	int32 i, j;
-	UNIT* uptr;
+int32 i, j;
+UNIT *uptr;
+static t_bool plugs_inited = FALSE;
 
-	static t_bool plugs_inited = FALSE;
+for (i=tq_max_plug=0; i<TQ_NUMDR; i++)
+    if (dptr->units[i].unit_plug > tq_max_plug)
+        tq_max_plug = (uint16)dptr->units[i].unit_plug;
+if (!plugs_inited ) {
+    uint32 d;
+    char uname[16];
 
-	if (!plugs_inited) {
-		uint32 d;
+    sprintf (uname, "%s-TIMER", dptr->name);
+    sim_set_uname (&dptr->units[4], uname);
+    sprintf (uname, "%s-QUESVC", dptr->name);
+    sim_set_uname (&dptr->units[5], uname);
+    plugs_inited  = TRUE;
+    for (d = 0; d < tq_dev.numunits - 2; d++)
+        tq_unit[d].unit_plug = d;
+    }
 
-		plugs_inited = TRUE;
-		for (d = 0; d < tq_dev.numunits - 2; d++)
-			tq_unit[d].unit_plug = d;
-	}
-
-	tq_csta = CST_S1;                                       /* init stage 1 */
-	tq_s1dat = 0;                                           /* no S1 data */
-	tq_dib.vec = 0;                                         /* no vector */
-	if (UNIBUS)                                             /* Unibus? */
-		tq_sa = SA_S1 | SA_S1C_DI | SA_S1C_MP;
-	else tq_sa = SA_S1 | SA_S1C_Q22 | SA_S1C_DI | SA_S1C_MP; /* init SA val */
-	tq_cflgs = CF_RPL;                                      /* ctrl flgs off */
-	tq_htmo = TQ_DHTMO;                                     /* default timeout */
-	tq_hat = tq_htmo;                                       /* default timer */
-	tq_cq.ba = tq_cq.lnt = tq_cq.idx = 0;                   /* clr cmd ring */
-	tq_rq.ba = tq_rq.lnt = tq_rq.idx = 0;                   /* clr rsp ring */
-	tq_credits = (TQ_NPKTS / 2) - 1;                        /* init credits */
-	tq_freq = 1;                                            /* init free list */
-	for (i = 0; i < TQ_NPKTS; i++) {                        /* all pkts free */
-		if (i)
-			tq_pkt[i].link = (i + 1) & TQ_M_NPKTS;
-		else tq_pkt[i].link = 0;
-		for (j = 0; j < TQ_PKT_SIZE_W; j++)
-			tq_pkt[i].d[j] = 0;
-	}
-	tq_rspq = 0;                                            /* no q'd rsp pkts */
-	tq_pbsy = 0;                                            /* all pkts free */
-	tq_pip = 0;                                             /* not polling */
-	CLR_INT (TQ);                                           /* clr intr req */
-	for (i = 0; i < TQ_NUMDR + 2; i++) {                    /* init units */
-		uptr = tq_dev.units + i;
-		sim_cancel (uptr);                                  /* clr activity */
-		sim_tape_reset (uptr);
-		uptr->flags = uptr->flags &                         /* not online */
-			~(UNIT_ONL | UNIT_ATP | UNIT_SXC | UNIT_POL | UNIT_TMK);
-		uptr->uf = 0;                                       /* clr unit flags */
-		uptr->cpkt = uptr->pktq = 0;                        /* clr pkt q's */
-		if (uptr->results == NULL)
-			uptr->results = calloc (1, sizeof (struct tq_req_results));
-		if (uptr->results == NULL)
-			return SCPE_MEM;
-	}
-	return SCPE_OK;
+tq_csta = CST_S1;                                       /* init stage 1 */
+tq_s1dat = 0;                                           /* no S1 data */
+tq_dib.vec = 0;                                         /* no vector */
+if (UNIBUS)                                             /* Unibus? */
+    tq_sa = SA_S1 | SA_S1C_DI | SA_S1C_MP;
+else tq_sa = SA_S1 | SA_S1C_Q22 | SA_S1C_DI | SA_S1C_MP; /* init SA val */
+tq_cflgs = CF_RPL;                                      /* ctrl flgs off */
+tq_htmo = TQ_DHTMO;                                     /* default timeout */
+tq_hat = tq_htmo;                                       /* default timer */
+tq_cq.ba = tq_cq.lnt = tq_cq.idx = 0;                   /* clr cmd ring */
+tq_rq.ba = tq_rq.lnt = tq_rq.idx = 0;                   /* clr rsp ring */
+tq_credits = (TQ_NPKTS / 2) - 1;                        /* init credits */
+tq_freq = 1;                                            /* init free list */
+for (i = 0; i < TQ_NPKTS; i++) {                        /* all pkts free */
+    if (i)
+        tq_pkt[i].link = (i + 1) & TQ_M_NPKTS;
+    else tq_pkt[i].link = 0;
+    for (j = 0; j < TQ_PKT_SIZE_W; j++)
+        tq_pkt[i].d[j] = 0;
+    }
+tq_rspq = 0;                                            /* no q'd rsp pkts */
+tq_pbsy = 0;                                            /* all pkts free */
+tq_pip = 0;                                             /* not polling */
+CLR_INT (TQ);                                           /* clr intr req */
+for (i = 0; i < TQ_NUMDR + 2; i++) {                    /* init units */
+    uptr = tq_dev.units + i;
+    sim_cancel (uptr);                                  /* clr activity */
+    sim_tape_reset (uptr);
+    uptr->flags = uptr->flags &                         /* not online */
+        ~(UNIT_ONL|UNIT_ATP|UNIT_SXC|UNIT_POL|UNIT_TMK);
+    uptr->uf = 0;                                       /* clr unit flags */
+    uptr->cpkt = uptr->pktq = 0;                        /* clr pkt q's */
+    if (uptr->results == NULL)
+        uptr->results = calloc (1, sizeof (struct tq_req_results));
+    if (uptr->results == NULL)
+        return SCPE_MEM;
+    }
+return SCPE_OK;
 }
 
 /* Device bootstrap */
@@ -2226,17 +2237,17 @@ static const uint16 boot_rom[] = {
     0000001                         /* go */
     };
 
-t_stat tq_boot (int32 unitno, DEVICE* dptr)
+t_stat tq_boot (int32 unitno, DEVICE *dptr)
 {
-    size_t i;
-    UNIT* uptr = &dptr->units[unitno];
+size_t i;
+UNIT *uptr = &dptr->units[unitno];
 
-    for (i = 0; i < BOOT_LEN; i++)
-        M[(BOOT_START >> 1) + i] = boot_rom[i];
-    M[BOOT_UNIT >> 1] = (uint16) uptr->unit_plug;
-    M[BOOT_CSR >> 1] = tq_dib.ba & DMASK;
-    cpu_set_boot (BOOT_ENTRY);
-    return SCPE_OK;
+for (i = 0; i < BOOT_LEN; i++)
+    WrMemW (BOOT_START + (2 * i), boot_rom[i]);
+WrMemW (BOOT_UNIT, (uint16)uptr->unit_plug);
+WrMemW (BOOT_CSR, tq_dib.ba & DMASK);
+cpu_set_boot (BOOT_ENTRY);
+return SCPE_OK;
 }
 
 #else
@@ -2409,33 +2420,33 @@ return SCPE_OK;
 
 /* Show unit plug */
 
-t_stat tq_show_plug (FILE* st, UNIT* uptr, int32 val, CONST void* desc)
+t_stat tq_show_plug (FILE *st, UNIT *uptr, int32 val, CONST void *desc)
 {
-    fprintf (st, "UNIT=%d", uptr->unit_plug);
-    return SCPE_OK;
+fprintf (st, "UNIT=%d", uptr->unit_plug);
+return SCPE_OK;
 }
 
 /* Set unit plug */
 
-t_stat tq_set_plug (UNIT* uptr, int32 val, CONST char* cptr, void* desc)
+t_stat tq_set_plug (UNIT *uptr, int32 val, CONST char *cptr, void *desc)
 {
-    int32 plug;
-    uint32 i;
-    t_stat r;
-    DEVICE* dptr = find_dev_from_unit (uptr);
+int32 plug;
+uint32 i;
+t_stat r;
+DEVICE *dptr = find_dev_from_unit (uptr);
 
-    if (cptr == NULL)
-        return sim_messagef (SCPE_ARG, "Must specify UNIT=value\n");
-    plug = (int32) get_uint (cptr, 10, 0xFFFFFFFF, &r);
-    if ((r != SCPE_OK) || (plug > 65534))
-        return sim_messagef (SCPE_ARG, "Invalid Unit Plug Number: %s\n", cptr);
-    if (uptr->unit_plug == plug)
-        return SCPE_OK;
-    for (i = 0; i < dptr->numunits - 2; i++)
-        if (dptr->units[i].unit_plug == plug)
-            return sim_messagef (SCPE_ARG, "Unit Plug %d Already In Use on %s\n", plug, sim_uname (&dptr->units[i]));
-    uptr->unit_plug = plug;
+if (cptr == NULL)
+    return sim_messagef (SCPE_ARG, "Must specify UNIT=value\n");
+plug = (int32) get_uint (cptr, 10, 0xFFFFFFFF, &r);
+if ((r != SCPE_OK) || (plug > 65534))
+    return sim_messagef (SCPE_ARG, "Invalid Unit Plug Number: %s\n", cptr);
+if (uptr->unit_plug == plug)
     return SCPE_OK;
+for (i=0; i < dptr->numunits - 2; i++)
+    if (dptr->units[i].unit_plug == plug)
+        return sim_messagef (SCPE_ARG, "Unit Plug %d Already In Use on %s\n", plug, sim_uname (&dptr->units[i]));
+uptr->unit_plug = plug;
+return SCPE_OK;
 }
 
 static t_stat tq_help (FILE *st, DEVICE *dptr, UNIT *uptr, int32 flag, const char *cptr)

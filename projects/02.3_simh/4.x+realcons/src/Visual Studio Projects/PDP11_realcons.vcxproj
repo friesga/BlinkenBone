@@ -130,12 +130,15 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">HAVE_PTW32_CONFIG_H;PTW32_BUILD_INLINED;PTW32_STATIC_LIB;__CLEANUP_C</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="..\display\display.c" />
+    <ClCompile Include="..\display\ng.c" />
+    <ClCompile Include="..\display\sim_ws.c" />
     <ClCompile Include="..\display\vt11.c" />
-    <ClCompile Include="..\display\win32.c" />
+    <ClCompile Include="..\PDP11\pdp11_ch.c" />
     <ClCompile Include="..\PDP11\pdp11_cis.c" />
     <ClCompile Include="..\PDP11\pdp11_cpu.c" />
     <ClCompile Include="..\PDP11\pdp11_cpumod.c" />
     <ClCompile Include="..\PDP11\pdp11_cr.c" />
+    <ClCompile Include="..\PDP11\pdp11_daz.c" />
     <ClCompile Include="..\PDP11\pdp11_dc.c" />
     <ClCompile Include="..\PDP11\pdp11_dl.c" />
     <ClCompile Include="..\PDP11\pdp11_dmc.c" />
@@ -149,6 +152,7 @@
     <ClCompile Include="..\PDP11\pdp11_kg.c" />
     <ClCompile Include="..\PDP11\pdp11_kmc.c" />
     <ClCompile Include="..\PDP11\pdp11_lp.c" />
+    <ClCompile Include="..\PDP11\pdp11_ng.c" />
     <ClCompile Include="..\PDP11\pdp11_pclk.c" />
     <ClCompile Include="..\PDP11\pdp11_pt.c" />
     <ClCompile Include="..\PDP11\pdp11_rc.c" />
@@ -156,6 +160,7 @@
     <ClCompile Include="..\PDP11\pdp11_rh.c" />
     <ClCompile Include="..\PDP11\pdp11_rk.c" />
     <ClCompile Include="..\PDP11\pdp11_rl.c" />
+    <ClCompile Include="..\PDP11\pdp11_rom.c" />
     <ClCompile Include="..\PDP11\pdp11_rp.c" />
     <ClCompile Include="..\PDP11\pdp11_rq.c" />
     <ClCompile Include="..\PDP11\pdp11_rs.c" />

@@ -157,6 +157,8 @@ extern "C" {
 
 #define SIM_KEY_UNKNOWN        200
 
+typedef struct VID_DISPLAY VID_DISPLAY;
+
 struct mouse_event {
     int32 x_rel;                                          /* X axis relative motion */
     int32 y_rel;                                          /* Y axis relative motion */
@@ -165,11 +167,15 @@ struct mouse_event {
     t_bool b1_state;                                      /* state of button 1 */
     t_bool b2_state;                                      /* state of button 2 */
     t_bool b3_state;                                      /* state of button 3 */
+    DEVICE *dev;                                          /* which device */
+    VID_DISPLAY *vptr;                                    /* which display */
     };
 
 struct key_event {
     uint32 key;                                           /* key sym */
     uint32 state;                                         /* key state change */
+    DEVICE *dev;                                          /* which device */
+    VID_DISPLAY *vptr;                                    /* which display */
     };
 
 typedef struct mouse_event SIM_MOUSE_EVENT;
@@ -180,9 +186,13 @@ t_stat vid_open (DEVICE *dptr, const char *title, uint32 width, uint32 height, i
                                                             /* code responsible for cursor display in video) */
 typedef void (*VID_QUIT_CALLBACK)(void);
 t_stat vid_register_quit_callback (VID_QUIT_CALLBACK callback);
+typedef void (*VID_GAMEPAD_CALLBACK)(int, int, int);
+t_stat vid_register_gamepad_motion_callback (VID_GAMEPAD_CALLBACK);
+t_stat vid_register_gamepad_button_callback (VID_GAMEPAD_CALLBACK);
 t_stat vid_close (void);
 t_stat vid_poll_kb (SIM_KEY_EVENT *ev);
 t_stat vid_poll_mouse (SIM_MOUSE_EVENT *ev);
+uint32 vid_map_rgb (uint8 r, uint8 g, uint8 b);
 void vid_draw (int32 x, int32 y, int32 w, int32 h, uint32 *buf);
 void vid_beep (void);
 void vid_refresh (void);
@@ -194,15 +204,41 @@ t_stat vid_show_release_key (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat vid_show_video (FILE* st, UNIT* uptr, int32 val, CONST void* desc);
 t_stat vid_show (FILE* st, DEVICE *dptr,  UNIT* uptr, int32 val, CONST char* desc);
 t_stat vid_screenshot (const char *filename);
+t_bool vid_is_fullscreen (void);
+t_stat vid_set_fullscreen (t_bool flag);
 
-extern t_bool vid_active;
-extern uint32 vid_mono_palette[2];
+extern int vid_active;
 void vid_set_cursor_position (int32 x, int32 y);        /* cursor position (set by calling code) */
 
-#define SIM_VID_DBG_MOUSE   0x01000000
-#define SIM_VID_DBG_CURSOR  0x02000000
-#define SIM_VID_DBG_KEY     0x04000000
-#define SIM_VID_DBG_VIDEO   0x08000000
+t_stat vid_open_window (VID_DISPLAY **vptr, DEVICE *dptr, const char *title, uint32 width, uint32 height, int flags);
+t_stat vid_close_window (VID_DISPLAY *vptr);
+t_stat vid_close_all (void);
+uint32 vid_map_rgb_window (VID_DISPLAY *vptr, uint8 r, uint8 g, uint8 b);
+void vid_draw_window (VID_DISPLAY *vptr, int32 x, int32 y, int32 w, int32 h, uint32 *buf);
+void vid_refresh_window (VID_DISPLAY *vptr);
+t_stat vid_set_cursor_window (VID_DISPLAY *vptr, t_bool visible, uint32 width, uint32 height, uint8 *data, uint8 *mask, uint32 hot_x, uint32 hot_y);
+t_bool vid_is_fullscreen_window (VID_DISPLAY *vptr);
+t_stat vid_set_fullscreen_window (VID_DISPLAY *vptr, t_bool flag);
+void vid_set_cursor_position_window (VID_DISPLAY *vptr, int32 x, int32 y);        /* cursor position (set by calling code) */
+
+/* A device simulator can optionally set the vid_display_kb_event_process
+ * routine pointer to the address of a routine.
+ * Simulator code which uses the display library which processes window 
+ * keyboard data with code in display/sim_ws.c can use this routine to
+ * explicitly get access to keyboard events that arrive in the display 
+ * window.  This routine should return 0 if it has handled the event that
+ * was passed, and non zero if it didn't handle it.  If the routine address
+ * is not set or a non zero return value occurs, then the keyboard event
+ * will be processed by the display library which may then be handled as
+ * console character input if the device console code is implemented to 
+ * accept this.
+ */
+extern int (*vid_display_kb_event_process)(SIM_KEY_EVENT *kev);
+
+#define SIM_VID_DBG_MOUSE   0x10000000
+#define SIM_VID_DBG_CURSOR  0x20000000
+#define SIM_VID_DBG_KEY     0x40000000
+#define SIM_VID_DBG_VIDEO   0x80000000
 
 #ifdef  __cplusplus
 }

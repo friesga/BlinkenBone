@@ -8666,7 +8666,6 @@ t_stat run_cmd (int32 flag, CONST char *cptr)
 	int32 sim_next = 0;
 	int32 unitno;
 	t_value new_pcv, orig_pcv;
-	t_value pcv, orig_pcv;
 	t_stat r;
 	DEVICE *dptr;
 	UNIT *uptr;
@@ -9068,6 +9067,14 @@ void fprint_stopped (FILE * st, t_stat v)
 t_stat step_svc (UNIT * uptr)
 {
 	return SCPE_STEP;
+}
+
+/* Unit service for run for timeout, originally scheduled by RUNFOR n command
+   Return runlimit timeout SCP code, will cause simulation to stop */
+
+t_stat runlimit_svc (UNIT *uptr)
+{
+	return SCPE_RUNTIME;
 }
 
 /* Unit service to facilitate expect matching to stop simulation.
@@ -13915,14 +13922,6 @@ void sim_printf (const char *fmt, ...)
 
 	if (buf != stackbuf)
 		free (buf);
-}
-
-void sim_perror (const char *msg)
-{
-	int saved_errno = errno;
-
-	perror (msg);
-	sim_printf ("%s: %s\n", msg, strerror (saved_errno));
 }
 
 void sim_perror (const char *msg)

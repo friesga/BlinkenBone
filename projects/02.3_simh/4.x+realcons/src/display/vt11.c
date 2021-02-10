@@ -1760,36 +1760,35 @@ clip3(int32 x0, int32 y0, int32 z0, int32 x1, int32 y1, int32 z1)
      *                                  tPL := tL
      */
 
-     /*
-          The following code is commented out here and written more
-          compactly below since tPEn, tPEd, tPLn and tPLd are constants.
+    /*
+         The following code is commented out here and written more
+         compactly below since tPEn, tPEd, tPLn and tPLd are constants.
 
-     if (rdx < 0) {
-         if (x0 <= 0 && x0 >= rdx) {
-             if (tPEd > 0) {
-                 if (x0 * (long)tPEd < (long)tPEn * rdx)
-                     tPEn = x0, tPEd = rdx;
-             } else                      // tPEd < 0
-                 if (x0 * (long)tPEd > (long)tPEn * rdx)
-                     tPEn = x0, tPEd = rdx;
-         }
-     } else {                            // rdx > 0
-         if (x0 >= 0 && x0 <= rdx) {
-             if (tPLd > 0) {
-                 if (x0 * (long)tPLd < (long)tPLn * rdx)
-                     tPLn = x0, tPLd = rdx;
-             } else                      // tPLd < 0
-                 if (x0 * (long)tPLd > (long)tPLn * rdx)
-                     tPLn = x0, tPLd = rdx;
-         }
-     }
-     */
+    if (rdx < 0) {
+        if (x0 <= 0 && x0 >= rdx) {
+            if (tPEd > 0) {
+                if (x0 * (long)tPEd < (long)tPEn * rdx)
+                    tPEn = x0, tPEd = rdx;
+            } else                      // tPEd < 0 
+                if (x0 * (long)tPEd > (long)tPEn * rdx)
+                    tPEn = x0, tPEd = rdx;
+        }
+    } else {                            // rdx > 0
+        if (x0 >= 0 && x0 <= rdx) {
+            if (tPLd > 0) {
+                if (x0 * (long)tPLd < (long)tPLn * rdx)
+                    tPLn = x0, tPLd = rdx;
+            } else                      // tPLd < 0
+                if (x0 * (long)tPLd > (long)tPLn * rdx)
+                    tPLn = x0, tPLd = rdx;
+        }
+    }
+    */
 
     if (rdx < 0) {
         if (x0 <= 0 && x0 >= rdx)       /* x0 not positive but less negative than rdx? */
             tPEn = x0, tPEd = rdx;
-    }
-    else {
+    } else {
         if ((x0 >= 0 && x0 <= rdx) &&   /* x0 not negative but less than or equal to rdx */
             (rdx != 0))                 /* and rdx not zero */
             tPLn = x0, tPLd = rdx;
@@ -1827,29 +1826,26 @@ clip3(int32 x0, int32 y0, int32 z0, int32 x1, int32 y1, int32 z1)
      */
 
     tn = x0 - CLIPXMAX;
-
     if (rdx < 0) {
         if (tn <= 0 && tn >= rdx) {
             if (tPLd > 0) {
-                if (tn * (long) tPLd > (long) tPLn * rdx)
+                if (tn * (long)tPLd > (long)tPLn * rdx)
                     tPLn = tn, tPLd = rdx;
-            }
-            else                      // tPLd < 0
-                if (tn * (long) tPLd < (long) tPLn * rdx)
+            } else                      // tPLd < 0
+                if (tn * (long)tPLd < (long)tPLn * rdx)
                     tPLn = tn, tPLd = rdx;
         }
-    }
-    else {                            // rdx > 0
+    } else {                            // rdx > 0
         if (tn >= 0 && tn <= rdx) {
             if (tPEd > 0) {
-                if (tn * (long) tPEd > (long) tPEn * rdx)
+                if (tn * (long)tPEd > (long)tPEn * rdx)
                     tPEn = tn, tPEd = rdx;
-            }
-            else                      // tPEd < 0
-                if (tn * (long) tPEd < (long) tPEn * rdx)
+            } else                      // tPEd < 0
+                if (tn * (long)tPEd < (long)tPEn * rdx)
                     tPEn = tn, tPEd = rdx;
         }
     }
+
 
     /*
      * Bottom:  tB = NB . (PB - P0) / NB . (P1 - P0)
@@ -2161,7 +2157,7 @@ vector3(int i, int32 dx, int32 dy, int32 dz)   /* unscaled display-file units */
 
     if (lp0_hit) {
         long tangent = 0;
-        int32 adx = ABS (dx), ady = ABS (dy);
+        int32 adx = ABS(dx), ady = ABS(dy);
         if (adx >= ady) {
             if (dx)
                 tangent = 010000L * dy / dx;        /* signed */
@@ -2169,8 +2165,7 @@ vector3(int i, int32 dx, int32 dy, int32 dz)   /* unscaled display-file units */
             if (dx)
                 tangent = 010000L * dz / dx;
             lp_zpos = z0 + tangent * (lp_xpos - x0) / 010000L;
-        }
-        else {
+        } else {
             if (dy)
                 tangent = 010000L * dx / dy;        /* signed */
             lp_xpos = x0 + tangent * (lp_ypos - y0) / 010000L;

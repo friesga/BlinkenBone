@@ -93,7 +93,7 @@ return 0;
 #define CLOCK_REALTIME 1
 #define NEED_CLOCK_GETTIME 1
 #if !defined(HAVE_STRUCT_TIMESPEC)
-#define HAVE_STRUCT_TIMESPEC 1
+#define HAVE_STRUCT_TIMESPEC
 #if !defined(_TIMESPEC_DEFINED)
 #define _TIMESPEC_DEFINED
 struct timespec {
@@ -867,7 +867,7 @@ if (!simulator_panel) {
     p->pidProcess = fork();
     if (p->pidProcess == 0) {
         close (0); close (1); close (2);        /* make sure not to pass the open standard handles */
-        dup (dup (open ("/dev/null", O_RDWR))); /* open standard handles to /dev/null */
+        if (dup (dup (open ("/dev/null", O_RDWR)))) {}; /* open standard handles to /dev/null */
         if (execlp (sim_path, sim_path, p->temp_config, NULL, NULL)) {
             perror ("execl");
             exit(errno);
