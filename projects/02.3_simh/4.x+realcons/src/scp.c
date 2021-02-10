@@ -8725,8 +8725,8 @@ t_stat run_cmd (int32 flag, CONST char *cptr)
 					return sim_messagef (r, "Unable to establish breakpoint at: %s\n", cptr);
 			}
 			sim_switches = saved_switches;
-			put_rval_pcchk (sim_PC, 0, new_pcv, new_pc);        /* Save in PC */
 		}
+		put_rval_pcchk (sim_PC, 0, new_pcv, new_pc);        /* Save in PC */
 
 #ifdef USE_REALCONS
 		//	if (cpu_realcons->connected && !realcons_machine_set_state(cpu_realcons,REALCONS_MS_GENERIC_CPU_RUN_START)) {
