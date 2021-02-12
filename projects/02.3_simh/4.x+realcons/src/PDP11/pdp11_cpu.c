@@ -327,6 +327,7 @@ t_stat reason;                                          /* stop reason */
 
 extern int32 CPUERR, MAINT;
 extern CPUTAB cpu_tab[];
+extern int32 CCR, HITMISS;
 
 /* Function declarations */
 
@@ -358,6 +359,7 @@ void WriteB (int32 data, int32 addr);
 void WriteCW (int32 data, int32 addr);
 void PWriteW (int32 data, int32 addr);
 void PWriteB (int32 data, int32 addr);
+void setHITMISS (int);
 void set_r_display (int32 rs, int32 cm);
 t_stat CPU_wr (int32 data, int32 addr, int32 access);
 void set_stack_trap (int32 adr);
@@ -2822,12 +2824,14 @@ if (BPT_SUMM_RD &&
     (sim_brk_test (va & 0177777, BPT_RDVIR) ||
      sim_brk_test (pa, BPT_RDPHY)))                     /* read breakpoint? */
     ABORT (ABRT_BKPT);                                  /* stop simulation */
-if (ADDR_IS_MEM (pa))                                   /* memory address? */
+if (ADDR_IS_MEM (pa)) {                                 /* memory address? */
+    if (CPUO (OPT_CACHE)) setHITMISS (HIT);
 #ifdef USE_REALCONS
-		RETURN_REALCONS_CPU_PDP11_MEMACCESS_VA_PA_READ(cpu_realcons, va, pa, RdMemW (pa));
+    RETURN_REALCONS_CPU_PDP11_MEMACCESS_VA_PA_READ (cpu_realcons, va, pa, RdMemW (pa));
 #else
     return RdMemW (pa);
 #endif
+}
 
 if ((pa < IOPAGEBASE) ||                                /* not I/O address */
     (CPUT (CPUT_J) && (pa >= IOBA_CPU))) {              /* or J11 int reg? */
@@ -2939,12 +2943,15 @@ int32 PReadW (int32 pa)
 {
 int32 data;
 
-if (ADDR_IS_MEM (pa))                                   /* memory address? */
+if (ADDR_IS_MEM (pa)) {                                 /* memory address? */
+    if (CPUO (OPT_CACHE)) setHITMISS (HIT);
 #ifdef USE_REALCONS
-	RETURN_REALCONS_CPU_PDP11_MEMACCESS_PA_READ(cpu_realcons, pa, RdMemW (pa));
+    RETURN_REALCONS_CPU_PDP11_MEMACCESS_PA_READ (cpu_realcons, pa, RdMemW (pa));
 #else
     return RdMemW (pa);
 #endif
+}
+
 if (pa < IOPAGEBASE) {                                  /* not I/O address? */
     setCPUERR (CPUE_NXM);
     ABORT (TRAP_NXM);
@@ -2963,12 +2970,15 @@ int32 PReadB (int32 pa)
 {
 int32 data;
 
-if (ADDR_IS_MEM (pa))                                   /* memory address? */
+if (ADDR_IS_MEM (pa)) {                                 /* memory address? */
+    if (CPUO (OPT_CACHE)) setHITMISS (HIT);
 #ifdef USE_REALCONS
-	RETURN_REALCONS_CPU_PDP11_MEMACCESS_PA_READ(cpu_realcons, pa, RdMemB (pa));
+    RETURN_REALCONS_CPU_PDP11_MEMACCESS_PA_READ (cpu_realcons, pa, RdMemB (pa));
 #else
     return RdMemB (pa);
 #endif
+}
+
 if (pa < IOPAGEBASE) {                                  /* not I/O address? */
     setCPUERR (CPUE_NXM);
     ABORT (TRAP_NXM);
@@ -3052,6 +3062,7 @@ PWriteW (data, pa);
 void PWriteW (int32 data, int32 pa)
 {
 if (ADDR_IS_MEM (pa)) {                                 /* memory address? */
+    if (CPUO (OPT_CACHE)) setHITMISS (MISS);
 #ifdef USE_REALCONS
 	REALCONS_CPU_PDP11_MEMACCESS_PA_WRITE(cpu_realcons, pa, data);
 #endif
@@ -3075,6 +3086,7 @@ return;
 void PWriteB (int32 data, int32 pa)
 {
 if (ADDR_IS_MEM (pa)) {                                 /* memory address? */
+    if (CPUO (OPT_CACHE)) setHITMISS (MISS);
 #ifdef USE_REALCONS
 	REALCONS_CPU_PDP11_MEMACCESS_PA_WRITE(cpu_realcons, pa, data);
 #endif
@@ -3093,6 +3105,18 @@ if (iopageW (data, pa, WRITEB) != SCPE_OK) {            /* invalid I/O addr? */
 	REALCONS_CPU_PDP11_MEMACCESS_PA_WRITE(cpu_realcons, pa, data);
 #endif
 return;
+}
+
+/*
+ * Maintain the cache HITMISS register. All reads are hits, all writes are misses. 
+ */
+void setHITMISS (int hitmiss)
+{
+    // The cache is disabled if bits 2 and 3 are set both cf. Processor Handbook
+    if (~CCR & 0x0C) {
+        // Set hit/miss register
+        HITMISS = hitmiss ? ((HITMISS << 1) & 0x3F) | 0x01 : (HITMISS << 1) & 0x3F;
+    }
 }
 
 /* Relocate virtual address, read access
@@ -3751,6 +3775,7 @@ if (sw & SWMASK ('V')) {                                /* -v */
         return SCPE_REL;
     }
 if (ADDR_IS_MEM (addr)) {
+    if (CPUO (OPT_CACHE)) setHITMISS (HIT);
     *vptr = RdMemW (addr) & 0177777;
     return SCPE_OK;
     }
@@ -3773,6 +3798,7 @@ if (sw & SWMASK ('V')) {                                /* -v */
         return SCPE_REL;
     }
 if (ADDR_IS_MEM (addr)) {
+    if (CPUO (OPT_CACHE)) setHITMISS (MISS);
     WrMemW (addr, val & 0177777);
     return SCPE_OK;
     }
